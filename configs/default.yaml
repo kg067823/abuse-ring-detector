@@ -1,0 +1,36 @@
+seed: 42
+customers: 20000
+orders: 50000
+date_range_days: 180
+rings:
+  count: 180
+  min_size: 5
+  max_size: 24
+  types:
+    shared_device: 0.25
+    shared_address: 0.25
+    behavioral: 0.25
+    mixed: 0.25
+normal_sharing:
+  household_fraction: 0.10
+  business_fraction: 0.03
+  shared_device_fraction: 0.08
+  shared_address_fraction: 0.12
+split:
+  train: 0.70
+  validation: 0.15
+  test: 0.15
+graph:
+  history_days: 30
+  community_algorithm: greedy_modularity
+model:
+  backend: hist_gradient_boosting
+  max_iter: 160
+  learning_rate: 0.08
+  max_leaf_nodes: 15
+costs:
+  review_cost: 2.0
+  false_positive_block_cost: 10.0
+  alert_budget: 0.05
+outputs:
+  format: csv.gz

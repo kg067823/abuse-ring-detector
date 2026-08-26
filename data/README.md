@@ -1,0 +1,1 @@
+Generated synthetic CSV/GZIP datasets are written to run-specific artifact directories. Do not treat them as production or real customer data.
