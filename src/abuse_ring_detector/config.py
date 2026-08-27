@@ -10,9 +10,16 @@ import yaml
 
 @dataclass
 class RingConfig:
-    count: int = 180
-    min_size: int = 5
-    max_size: int = 24
+    count: int = 260
+    min_size: int = 4
+    max_size: int = 16
+    min_duration_days: int = 7
+    max_duration_days: int = 24
+    activity_rate: float = 0.85
+    min_orders_per_member: int = 1
+    max_orders_per_member: int = 3
+    minimum_test_active_rings: int = 40
+    minimum_test_rings_per_type: int = 8
     types: dict[str, float] = field(default_factory=lambda: {
         "shared_device": 0.25, "shared_address": 0.25,
         "behavioral": 0.25, "mixed": 0.25,
@@ -37,10 +44,14 @@ class Config:
 def validate_config(config: Config) -> None:
     if config.customers < 10 or config.orders < 20 or config.date_range_days < 2:
         raise ValueError("customers/orders/date_range_days are too small")
-    if not 100 <= config.rings.count <= 300:
-        raise ValueError("rings.count must be between 100 and 300")
-    if config.rings.min_size < 3 or config.rings.max_size < config.rings.min_size:
+    if not 10 <= config.rings.count <= 1000:
+        raise ValueError("rings.count must be between 10 and 1000")
+    if config.rings.min_size < 2 or config.rings.max_size < config.rings.min_size:
         raise ValueError("invalid ring size range")
+    if config.rings.min_duration_days < 1 or config.rings.max_duration_days < config.rings.min_duration_days:
+        raise ValueError("invalid ring duration range")
+    if not 0.0 < config.rings.activity_rate <= 1.0:
+        raise ValueError("ring activity_rate must be in (0, 1]")
     if set(config.rings.types) != {"shared_device", "shared_address", "behavioral", "mixed"}:
         raise ValueError("all four ring types must be configured")
     if abs(sum(config.rings.types.values()) - 1) > 1e-6 or any(v < 0 for v in config.rings.types.values()):

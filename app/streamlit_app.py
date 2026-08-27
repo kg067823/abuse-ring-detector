@@ -120,11 +120,18 @@ if not models:
     st.stop()
 
 # Normalize model results for compact comparison tables.
+model_labels = {
+    "baseline": "Behavioural baseline",
+    "graph": "Graph-enhanced",
+    "graph_temporal": "Graph + Temporal",
+    "graph_temporal_custrel": "Graph + Temp + CustRel",
+    "graph_temporal_custrel_2hop": "Graph + Temp + CustRel + 2Hop",
+}
 comparison_rows = []
 for mode, result in models.items():
     test = result.get("test", {})
     comparison_rows.append({
-        "Model": "Graph-enhanced" if mode == "graph" else "Behavioural baseline",
+        "Model": model_labels.get(mode, mode.replace("_", " ").title()),
         "PR-AUC": test.get("pr_auc", 0), "ROC-AUC": test.get("roc_auc", 0),
         "Precision": test.get("precision", 0), "Recall": test.get("recall", 0),
         "F1": test.get("f1", 0), "Alerts": test.get("alerts", 0),
@@ -151,13 +158,14 @@ with summary_tab:
             st.info("Expected loss was not present in this older run manifest.")
     for mode, result in models.items():
         test = result.get("test", {})
-        st.markdown(f"**{'Graph-enhanced' if mode == 'graph' else 'Behavioural baseline'}** — {test.get('true_positives', 0)} true positives, {test.get('false_positives', 0)} false positives, {test.get('false_negatives', 0)} missed abuse orders at threshold `{result.get('threshold', '—')}`.")
+        label = model_labels.get(mode, mode.replace("_", " ").title())
+        st.markdown(f"**{label}** — {test.get('true_positives', 0)} true positives, {test.get('false_positives', 0)} false positives, {test.get('false_negatives', 0)} missed abuse orders at threshold `{result.get('threshold', '—')}`.")
 
 with thresholds_tab:
     st.subheader("Choose the operating point")
     st.caption("Threshold selection is based on validation in the pipeline. This table shows how each locked model behaves on the held-out test set under the configured cost assumptions.")
     for mode, table in threshold_tables.items():
-        label = "Graph-enhanced" if mode == "graph" else "Behavioural baseline"
+        label = model_labels.get(mode, mode.replace("_", " ").title())
         st.markdown(f"#### {label}")
         display = table.set_index("threshold")
         st.dataframe(display.style.format({"precision": "{:.3f}", "recall": "{:.3f}", "f1": "{:.3f}", "expected_loss": "₹{:,.0f}"}), use_container_width=True)

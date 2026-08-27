@@ -34,10 +34,10 @@ def generate_ecosystem(config: Config) -> SyntheticDataset:
     })
 
     # Normal entity pools intentionally include shared households/businesses.
-    devices = np.array([f"D{i:05d}" for i in range(max(100, n_customers // 4))])
-    ips = np.array([f"IP{i:05d}" for i in range(max(200, n_customers // 2))])
-    addresses = np.array([f"A{i:05d}" for i in range(max(200, n_customers // 2))])
-    payments = np.array([f"P{i:05d}" for i in range(max(300, n_customers // 2))])
+    devices = np.array([f"D{i:05d}" for i in range(max(200, n_customers // 4))])
+    ips = np.array([f"IP{i:05d}" for i in range(max(400, n_customers // 2))])
+    addresses = np.array([f"A{i:05d}" for i in range(max(400, n_customers // 2))])
+    payments = np.array([f"P{i:05d}" for i in range(max(500, n_customers // 2))])
     hh_device = {h: devices[h % len(devices)] for h in np.unique(household)}
     hh_address = {h: addresses[h % len(addresses)] for h in np.unique(household)}
     wg_ip = {w: ips[w % len(ips)] for w in np.unique(workgroup)}
@@ -64,63 +64,114 @@ def generate_ecosystem(config: Config) -> SyntheticDataset:
 
     labels = pd.DataFrame({"order_id": orders.order_id, "is_abuse": False, "ring_id": pd.NA,
                            "abuse_type": pd.NA, "loss_amount": 0.0, "reason_codes": ""})
+
     ring_rows, membership_rows = [], []
+    abuse_order_rows, abuse_label_rows = [], []
     selected = set()
     types = list(config.rings.types)
     type_probs = np.array([config.rings.types[t] for t in types])
+
+    # Balanced ring type assignments
+    ring_types_assigned = [types[rng.choice(len(types), p=type_probs)] for _ in range(config.rings.count)]
+
+    # Use standard entity pools to prevent artificial ID-prefix leakage (no RD/RA/RP/RIP prefixes)
+    shared_device_pool = devices[:max(60, config.rings.count)]
+    shared_address_pool = addresses[:max(60, config.rings.count)]
+    shared_ip_pool = ips[:max(60, config.rings.count)]
+    shared_payment_pool = payments[:max(60, config.rings.count)]
+
+    order_counter = n_orders
+    min_dur = getattr(config.rings, "min_duration_days", 7)
+    max_dur = getattr(config.rings, "max_duration_days", 24)
+    act_rate = getattr(config.rings, "activity_rate", 0.85)
+    min_ord = getattr(config.rings, "min_orders_per_member", 1)
+    max_ord = getattr(config.rings, "max_orders_per_member", 3)
+
     for ring_num in range(config.rings.count):
-        ring_type = types[rng.choice(len(types), p=type_probs)]
+        ring_type = ring_types_assigned[ring_num]
         size = int(rng.integers(config.rings.min_size, config.rings.max_size + 1))
         members = rng.choice(n_customers, size=min(size, n_customers), replace=False)
-        # Keep ring injections mostly distinct while permitting realistic overlap.
         selected.update(members.tolist())
         ring_id = f"R{ring_num:04d}"
-        ring_start_day = int(rng.integers(20, max(21, config.date_range_days - 35)))
-        ring_end_day = min(config.date_range_days - 1, ring_start_day + int(rng.integers(8, 35)))
+
+        # Distribute ring starts across the entire date range so new rings emerge in Train, Validation, and Test
+        max_start = max(3, config.date_range_days - min_dur - 1)
+        ring_start_day = int(rng.integers(3, max_start + 1))
+        duration = int(rng.integers(min_dur, max_dur + 1))
+        ring_end_day = min(config.date_range_days - 1, ring_start_day + duration)
+
         ring_start = start + pd.Timedelta(days=ring_start_day)
         ring_end = start + pd.Timedelta(days=ring_end_day + 1)
-        intensity = float(rng.uniform(.7, 1.8))
-        ring_rows.append({"ring_id": ring_id, "ring_type": ring_type, "start_time": ring_start,
-                          "end_time": ring_end, "customer_count": len(members), "intensity": intensity})
-        for member in members:
-            membership_rows.append({"ring_id": ring_id, "customer_id": customer_ids[member],
-                                     "joined_at": ring_start, "left_at": ring_end, "ring_type": ring_type})
-        member_mask = orders.customer_id.isin(customer_ids[members]) & orders.event_time.between(ring_start, ring_end, inclusive="left")
-        member_orders = orders.index[member_mask]
-        if len(member_orders) == 0:
-            # Ensure a ring has observable activity by adding no synthetic rows; later report flags this.
-            continue
-        idx = np.asarray(member_orders)
-        if ring_type in {"shared_device", "mixed"}:
-            shared = f"RD{ring_num:04d}"
-            orders.loc[idx, "device_id"] = shared
-        if ring_type in {"shared_address", "mixed"}:
-            orders.loc[idx, "address_id"] = f"RA{ring_num:04d}"
-        if ring_type == "mixed":
-            orders.loc[idx, "payment_id"] = f"RP{ring_num:04d}"
-            orders.loc[idx, "ip_id"] = f"RIP{ring_num:04d}"
-        if ring_type in {"behavioral", "mixed"}:
-            orders.loc[idx, "amount"] = np.clip(rng.lognormal(8.2, .35, len(idx)), 100, 120_000).round(2)
-            # Coordinated but not identical category/timing patterns.
-            orders.loc[idx, "merchant_category"] = rng.choice(["electronics", "fashion", "travel"], len(idx), p=[.5,.3,.2])
-        reason = {"shared_device": "shared_device_velocity", "shared_address": "shared_address_returns",
-                  "behavioral": "coordinated_behavior", "mixed": "multi_entity_coordination"}[ring_type]
-        label_cols = ["is_abuse", "ring_id", "abuse_type", "loss_amount", "reason_codes"]
-        labels.loc[idx, "is_abuse"] = True
-        labels.loc[idx, "ring_id"] = ring_id
-        labels.loc[idx, "abuse_type"] = ring_type
-        labels.loc[idx, "loss_amount"] = orders.loc[idx, "amount"].to_numpy() * rng.uniform(.25, .8)
-        labels.loc[idx, "reason_codes"] = reason
+        intensity = float(rng.uniform(1.2, 2.2))
 
-    orders = orders.sort_values(["event_time", "order_id"], kind="mergesort").reset_index(drop=True)
-    labels = labels.set_index("order_id").loc[orders.order_id].reset_index()
+        ring_rows.append({
+            "ring_id": ring_id, "ring_type": ring_type, "start_time": ring_start,
+            "end_time": ring_end, "customer_count": len(members), "intensity": intensity
+        })
+        for member in members:
+            membership_rows.append({
+                "ring_id": ring_id, "customer_id": customer_ids[member],
+                "joined_at": ring_start, "left_at": ring_end, "ring_type": ring_type
+            })
+
+        ring_device = shared_device_pool[ring_num % len(shared_device_pool)]
+        ring_address = shared_address_pool[ring_num % len(shared_address_pool)]
+        ring_ip = shared_ip_pool[ring_num % len(shared_ip_pool)]
+        ring_payment = shared_payment_pool[ring_num % len(shared_payment_pool)]
+
+        # Generate realistic campaign transactions for ring members
+        for member in members:
+            if rng.random() > act_rate:
+                continue
+            n_member_orders = int(rng.integers(min_ord, max_ord + 1))
+            for _ in range(n_member_orders):
+                order_sec = rng.integers(0, max(1, int((ring_end - ring_start).total_seconds())))
+                o_time = ring_start + pd.Timedelta(seconds=int(order_sec))
+
+                o_device = ring_device if ring_type in {"shared_device", "mixed"} else (hh_device[household[member]] if rng.random() < 0.38 else rng.choice(devices))
+                o_address = ring_address if ring_type in {"shared_address", "mixed"} else (hh_address[household[member]] if rng.random() < 0.52 else rng.choice(addresses))
+                o_ip = ring_ip if ring_type == "mixed" else (wg_ip[workgroup[member]] if rng.random() < 0.25 else rng.choice(ips))
+                o_payment = ring_payment if ring_type == "mixed" else rng.choice(payments)
+
+                if ring_type in {"behavioral", "mixed"}:
+                    o_amount = float(np.clip(rng.lognormal(8.3, .30), 200, 150_000).round(2))
+                    o_category = rng.choice(["electronics", "fashion", "travel"], p=[.5, .3, .2])
+                else:
+                    o_amount = float(np.clip(rng.lognormal(7.6, .65), 100, 100_000).round(2))
+                    o_category = rng.choice(["electronics", "fashion", "grocery", "travel", "home"], p=[.2, .27, .25, .1, .18])
+
+                o_id = f"O{order_counter:07d}"
+                order_counter += 1
+
+                abuse_order_rows.append({
+                    "order_id": o_id, "customer_id": customer_ids[member],
+                    "event_time": o_time, "amount": o_amount, "currency": "INR",
+                    "device_id": o_device, "ip_id": o_ip, "address_id": o_address, "payment_id": o_payment,
+                    "merchant_category": o_category, "status": "completed", "retry_count": rng.poisson(.15),
+                })
+
+                reason = {"shared_device": "shared_device_velocity", "shared_address": "shared_address_returns",
+                          "behavioral": "coordinated_behavior", "mixed": "multi_entity_coordination"}[ring_type]
+                loss = float(o_amount * rng.uniform(0.3, 0.85))
+                abuse_label_rows.append({
+                    "order_id": o_id, "is_abuse": True, "ring_id": ring_id,
+                    "abuse_type": ring_type, "loss_amount": loss, "reason_codes": reason
+                })
+
+    all_orders = pd.concat([orders, pd.DataFrame(abuse_order_rows)], ignore_index=True) if abuse_order_rows else orders
+    all_labels = pd.concat([labels, pd.DataFrame(abuse_label_rows)], ignore_index=True) if abuse_label_rows else labels
+
+    all_orders = all_orders.sort_values(["event_time", "order_id"], kind="mergesort").reset_index(drop=True)
+    all_labels = all_labels.set_index("order_id").loc[all_orders.order_id].reset_index()
+
     ground_truth = (customers[["customer_id"]].copy())
     membership_groups = pd.DataFrame(membership_rows).groupby("customer_id", as_index=False).agg(
         ring_id=("ring_id", "first"), ring_type=("ring_type", "first")) if membership_rows else pd.DataFrame(columns=["customer_id", "ring_id", "ring_type"])
     ground_truth = ground_truth.merge(membership_groups, on="customer_id", how="left")
     ground_truth["is_abusive"] = ground_truth.ring_id.notna()
+
     return _with_returns(SyntheticDataset(
-        customers=customers, orders=orders, returns=pd.DataFrame(), labels=labels, ground_truth=ground_truth,
+        customers=customers, orders=all_orders, returns=pd.DataFrame(), labels=all_labels, ground_truth=ground_truth,
         rings=pd.DataFrame(ring_rows), ring_memberships=pd.DataFrame(membership_rows),
         metadata={"seed": config.seed, "start": str(start), "selected_abusive_customers": len(selected),
                   "entity_columns": ENTITY_COLUMNS},

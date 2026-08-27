@@ -3,9 +3,16 @@ customers: 20000
 orders: 50000
 date_range_days: 180
 rings:
-  count: 180
-  min_size: 5
-  max_size: 24
+  count: 260
+  min_size: 4
+  max_size: 16
+  min_duration_days: 7
+  max_duration_days: 24
+  activity_rate: 0.85
+  min_orders_per_member: 1
+  max_orders_per_member: 3
+  minimum_test_active_rings: 40
+  minimum_test_rings_per_type: 8
   types:
     shared_device: 0.25
     shared_address: 0.25
