@@ -16,6 +16,7 @@ from .features import (
     build_extended_features,
     build_full_features,
     build_two_hop_extended_features,
+    build_subgraph_extended_features,
 )
 from .models import fit_model, predict_scores
 from .reporting import write_frame, write_json, write_report
@@ -70,7 +71,14 @@ def _execute_pipeline(dataset, config, out: Path) -> dict:
     quality_report = compute_dataset_quality(dataset, split)
     quality_json = _save_quality_artifacts(quality_report, out)
 
-    modes = ["baseline", "graph", "graph_temporal", "graph_temporal_custrel", "graph_temporal_custrel_2hop"]
+    modes = [
+        "baseline",
+        "graph",
+        "graph_temporal",
+        "graph_temporal_custrel",
+        "graph_temporal_custrel_2hop",
+        "graph_temporal_custrel_2hop_subgraph",
+    ]
     cost = CostModel(config.costs["review_cost"], config.costs["false_positive_block_cost"])
 
     for mode in modes:
@@ -82,8 +90,10 @@ def _execute_pipeline(dataset, config, out: Path) -> dict:
             fs = build_full_features(dataset.orders, dataset.labels, config.graph["history_days"])
         elif mode == "graph_temporal_custrel":
             fs = build_extended_features(dataset.orders, dataset.labels, config.graph["history_days"])
-        else:
+        elif mode == "graph_temporal_custrel_2hop":
             fs = build_two_hop_extended_features(dataset.orders, dataset.labels, config.graph["history_days"])
+        else:
+            fs = build_subgraph_extended_features(dataset.orders, dataset.labels, config.graph["history_days"])
 
         ids = fs.X.index
         train_ids, val_ids, test_ids = [pd.Index(v) for v in [split_ids["train"], split_ids["validation"], split_ids["test"]]]

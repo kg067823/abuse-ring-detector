@@ -55,6 +55,7 @@ class RingDossier:
     last_cluster_activity_time: str | None
     cluster_lifespan_days: float
     narrative_summary: str
+    subgraph_topology_metrics: dict[str, float] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -224,6 +225,23 @@ class StreamingDossierExtractor:
         last_time = max(all_times) if all_times else as_of_time
         lifespan_days = (last_time - first_time).total_seconds() / 86400.0
 
+        # Subgraph topology metrics
+        total_subgraph_nodes = len(all_cluster_customers) + total_entities_count
+        subgraph_edge_count = len(explanatory_paths)
+        subgraph_density_7d = (2.0 * subgraph_edge_count) / (total_subgraph_nodes * (total_subgraph_nodes - 1)) if total_subgraph_nodes > 1 else 0.0
+        shared_modalities = sum(1 for k in ["devices", "addresses", "ips", "payments"] if len(connecting_entities[k]) > 0)
+        
+        subgraph_metrics = {
+            "subgraph_node_count_24h": float(len(orders_24h) + len(all_1hop_customers)),
+            "subgraph_customer_count_24h": float(len(all_1hop_customers) + 1),
+            "subgraph_entity_count_24h": float(len(current_entities)),
+            "subgraph_edge_density_7d": round(float(subgraph_density_7d), 4),
+            "subgraph_shared_modality_count_7d": float(shared_modalities),
+            "subgraph_multi_entity_conspirator_count_7d": float(len(all_1hop_customers)),
+            "subgraph_order_burst_velocity_1h": float(len([o for o in cluster_orders if o["event_time"] >= as_of_time - pd.Timedelta(hours=1)])),
+            "subgraph_growth_ratio_1h_vs_24h": round(float(peer_velocity_ratio), 2),
+        }
+
         # Generate narrative summary
         narrative = (
             f"Alerted Order {target_order_id} (Customer {target_cust}, Score: {score:.4f}, Tier: {risk_tier}) "
@@ -259,4 +277,5 @@ class StreamingDossierExtractor:
             last_cluster_activity_time=last_time.isoformat(),
             cluster_lifespan_days=round(lifespan_days, 2),
             narrative_summary=narrative,
+            subgraph_topology_metrics=subgraph_metrics,
         )

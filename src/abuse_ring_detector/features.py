@@ -508,3 +508,225 @@ def build_two_hop_extended_features(orders: pd.DataFrame, labels: pd.DataFrame |
     two_hop_fs = build_two_hop_features(orders, labels)
     X = d_fs.X.join(two_hop_fs.X.drop(columns=[c for c in two_hop_fs.X if c in d_fs.X], errors="ignore"), how="inner")
     return FeatureSet(X=X, y=d_fs.y.loc[X.index], ids=X.index.to_series(), manifest=pd.concat([d_fs.manifest, two_hop_fs.manifest], ignore_index=True))
+
+
+def build_subgraph_features(orders: pd.DataFrame, labels: pd.DataFrame | None = None) -> FeatureSet:
+    """Build streaming sliding-window suspicious subgraph features (20 features)."""
+    data = orders.sort_values(["event_time", "order_id"], kind="mergesort").reset_index(drop=True)
+    labels_by_id = labels.set_index("order_id") if labels is not None else None
+
+    # Inverted indices for bipartite graph:
+    # entity_col -> entity_val -> deque of (Timestamp, customer_id, order_id)
+    entity_events: dict[str, dict[str, deque[tuple[pd.Timestamp, str, str]]]] = {
+        col: defaultdict(deque) for col in ENTITY_COLUMNS
+    }
+    # customer_id -> deque of (Timestamp, dict of entity_col -> entity_val, order_id)
+    customer_events: dict[str, deque[tuple[pd.Timestamp, dict[str, str], str]]] = defaultdict(deque)
+
+    # Node first appearance tracker in local state: node_id -> first_seen_time
+    node_first_seen: dict[str, pd.Timestamp] = {}
+    edge_first_seen: dict[tuple[str, str], pd.Timestamp] = {}
+
+    rows = []
+
+    for row in data.itertuples(index=False):
+        now = pd.Timestamp(row.event_time)
+        cutoff_7d = now - pd.Timedelta(days=7)
+        cutoff_24h = now - pd.Timedelta(hours=24)
+        cutoff_1h = now - pd.Timedelta(hours=1)
+
+        curr_cust = row.customer_id
+        curr_entities = {col: str(getattr(row, col)) for col in ENTITY_COLUMNS}
+
+        # 1-Hop Customers & Entities in 7d and 24h
+        custs_7d: set[str] = {curr_cust}
+        custs_24h: set[str] = {curr_cust}
+
+        ents_7d: set[str] = set(curr_entities.values())
+        ents_24h: set[str] = set(curr_entities.values())
+
+        edges_7d: set[tuple[str, str]] = set()
+        edges_24h: set[tuple[str, str]] = set()
+
+        # 1-Hop direct peers per entity
+        direct_peers_7d: dict[str, set[str]] = {col: set() for col in ENTITY_COLUMNS}
+        for col in ENTITY_COLUMNS:
+            val = curr_entities[col]
+            dq = entity_events[col][val]
+            while dq and dq[0][0] <= cutoff_7d:
+                dq.popleft()
+            for t, c, _ in dq:
+                if c != curr_cust:
+                    direct_peers_7d[col].add(c)
+                    custs_7d.add(c)
+                    ents_7d.add(val)
+                    edges_7d.add((c, val))
+                    if t > cutoff_24h:
+                        custs_24h.add(c)
+                        ents_24h.add(val)
+                        edges_24h.add((c, val))
+
+        # 2-Hop expansion: gather all entities used by direct peers and their connecting customers
+        all_1hop_peers_7d = set.union(*direct_peers_7d.values()) if direct_peers_7d else set()
+
+        for peer in all_1hop_peers_7d:
+            p_dq = customer_events[peer]
+            for t, e_dict, _ in p_dq:
+                if t > cutoff_7d:
+                    for col, e_val in e_dict.items():
+                        ents_7d.add(e_val)
+                        edges_7d.add((peer, e_val))
+                        # Find 2-hop peers using e_val
+                        for t_e, c_2hop, _ in entity_events[col][e_val]:
+                            if t_e > cutoff_7d and c_2hop != curr_cust:
+                                custs_7d.add(c_2hop)
+                                edges_7d.add((c_2hop, e_val))
+                        if t > cutoff_24h:
+                            ents_24h.add(e_val)
+                            edges_24h.add((peer, e_val))
+                            for t_e, c_2hop, _ in entity_events[col][e_val]:
+                                if t_e > cutoff_24h and c_2hop != curr_cust:
+                                    custs_24h.add(c_2hop)
+                                    edges_24h.add((c_2hop, e_val))
+
+        # Add past edges for current customer as well
+        for t, e_dict, _ in customer_events[curr_cust]:
+            if t > cutoff_7d:
+                for col, e_val in e_dict.items():
+                    ents_7d.add(e_val)
+                    edges_7d.add((curr_cust, e_val))
+                    if t > cutoff_24h:
+                        ents_24h.add(e_val)
+                        edges_24h.add((curr_cust, e_val))
+
+        # Component Nodes & Edges
+        total_nodes_24h = len(custs_24h) + len(ents_24h)
+        total_nodes_7d = len(custs_7d) + len(ents_7d)
+
+        edge_cnt_24h = len(edges_24h)
+        edge_cnt_7d = len(edges_7d)
+
+        # Density
+        c_24 = max(1, len(custs_24h))
+        e_24 = max(1, len(ents_24h))
+        density_24h = float(edge_cnt_24h) / (float(c_24 * e_24) + 1e-5)
+
+        c_7 = max(1, len(custs_7d))
+        e_7 = max(1, len(ents_7d))
+        density_7d = float(edge_cnt_7d) / (float(c_7 * e_7) + 1e-5)
+
+        avg_ents_per_cust_7d = float(edge_cnt_7d) / float(c_7)
+        avg_custs_per_ent_7d = float(edge_cnt_7d) / float(e_7)
+
+        # Shared Modalities & Multi-entity conspirators
+        shared_modalities = 0
+        for col in ENTITY_COLUMNS:
+            if len(direct_peers_7d[col]) > 0:
+                shared_modalities += 1
+
+        multi_modal_peers = 0
+        all_candidate_peers = all_1hop_peers_7d
+        for p in all_candidate_peers:
+            shared_cnt = sum(1 for col in ENTITY_COLUMNS if p in direct_peers_7d[col])
+            if shared_cnt >= 2:
+                multi_modal_peers += 1
+
+        max_overlap = 0
+        for p in all_candidate_peers:
+            shared_cnt = sum(1 for col in ENTITY_COLUMNS if p in direct_peers_7d[col])
+            if shared_cnt > max_overlap:
+                max_overlap = shared_cnt
+
+        # 1-Hour expansion dynamics
+        new_nodes_1h = 0
+        all_comp_nodes = custs_7d | ents_7d
+        for n in all_comp_nodes:
+            first_t = node_first_seen.get(n)
+            if first_t is not None and first_t > cutoff_1h:
+                new_nodes_1h += 1
+
+        new_edges_1h = 0
+        for edge in edges_7d:
+            first_t = edge_first_seen.get(edge)
+            if first_t is not None and first_t > cutoff_1h:
+                new_edges_1h += 1
+
+        growth_ratio = float(new_nodes_1h) / (float(total_nodes_24h) / 24.0 + 1e-5)
+
+        # Bridge behavior: number of disconnected peer components connected by current transaction
+        peer_modalities = [direct_peers_7d[col] for col in ENTITY_COLUMNS if len(direct_peers_7d[col]) > 0]
+        if len(peer_modalities) <= 1:
+            bridge_merges = 0.0
+        else:
+            merged_sets = []
+            for p_set in peer_modalities:
+                new_set = set(p_set)
+                remaining = []
+                for existing in merged_sets:
+                    if existing & new_set:
+                        new_set |= existing
+                    else:
+                        remaining.append(existing)
+                remaining.append(new_set)
+                merged_sets = remaining
+            bridge_merges = float(len(merged_sets))
+
+        # 1-Hour order burst across component customers
+        orders_1h = 0
+        for c in custs_7d:
+            for t, _, _ in customer_events[c]:
+                if t > cutoff_1h:
+                    orders_1h += 1
+
+        feature_row = {
+            "order_id": row.order_id,
+            "customer_id": row.customer_id,
+            "subgraph_node_count_24h": float(total_nodes_24h),
+            "subgraph_customer_count_24h": float(len(custs_24h)),
+            "subgraph_entity_count_24h": float(len(ents_24h)),
+            "subgraph_edge_count_24h": float(edge_cnt_24h),
+            "subgraph_node_count_7d": float(total_nodes_7d),
+            "subgraph_customer_count_7d": float(len(custs_7d)),
+            "subgraph_entity_count_7d": float(len(ents_7d)),
+            "subgraph_edge_count_7d": float(edge_cnt_7d),
+            "subgraph_edge_density_24h": float(density_24h),
+            "subgraph_edge_density_7d": float(density_7d),
+            "subgraph_avg_entities_per_cust_7d": float(avg_ents_per_cust_7d),
+            "subgraph_avg_custs_per_entity_7d": float(avg_custs_per_ent_7d),
+            "subgraph_shared_modality_count_7d": float(shared_modalities),
+            "subgraph_multi_entity_conspirator_count_7d": float(multi_modal_peers),
+            "subgraph_max_entity_overlap_degree_7d": float(max_overlap),
+            "subgraph_new_nodes_1h": float(new_nodes_1h),
+            "subgraph_new_edges_1h": float(new_edges_1h),
+            "subgraph_growth_ratio_1h_vs_24h": float(growth_ratio),
+            "subgraph_bridge_disjoint_components_7d": float(bridge_merges),
+            "subgraph_order_burst_velocity_1h": float(orders_1h),
+        }
+        rows.append(feature_row)
+
+        if curr_cust not in node_first_seen:
+            node_first_seen[curr_cust] = now
+        customer_events[curr_cust].append((now, curr_entities, row.order_id))
+
+        for col in ENTITY_COLUMNS:
+            val = curr_entities[col]
+            if val not in node_first_seen:
+                node_first_seen[val] = now
+            edge = (curr_cust, val)
+            if edge not in edge_first_seen:
+                edge_first_seen[edge] = now
+            entity_events[col][val].append((now, curr_cust, row.order_id))
+
+    X = pd.DataFrame(rows).set_index("order_id")
+    y = X.index.to_series().map(labels_by_id.is_abuse).astype(int) if labels_by_id is not None else pd.Series(index=X.index, dtype=int)
+    return FeatureSet(X=X.drop(columns="customer_id"), y=y, ids=X.index.to_series(),
+                      manifest=_manifest(X.drop(columns="customer_id").columns, "streaming suspicious subgraph features"))
+
+
+def build_subgraph_extended_features(orders: pd.DataFrame, labels: pd.DataFrame | None = None, history_days: int = 30) -> FeatureSet:
+    """Build Model F features (137 features): Model E (117) + suspicious subgraph features (20)."""
+    e_fs = build_two_hop_extended_features(orders, labels, history_days)
+    subgraph_fs = build_subgraph_features(orders, labels)
+    X = e_fs.X.join(subgraph_fs.X.drop(columns=[c for c in subgraph_fs.X if c in e_fs.X], errors="ignore"), how="inner")
+    return FeatureSet(X=X, y=e_fs.y.loc[X.index], ids=X.index.to_series(), manifest=pd.concat([e_fs.manifest, subgraph_fs.manifest], ignore_index=True))
+
