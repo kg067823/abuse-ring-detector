@@ -1,0 +1,6 @@
+{
+  "secrets_audit": true,
+  "dotenv_ignored": true,
+  "non_root_container": true,
+  "input_validation_fuzzing": true
+}

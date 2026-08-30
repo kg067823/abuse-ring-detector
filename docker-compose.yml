@@ -1,0 +1,50 @@
+version: "3.8"
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: abuse_ring_detector_api
+    ports:
+      - "8000:8000"
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8000
+      - WORKERS=4
+      - REDIS_URL=redis://redis:6379/0
+      - MODEL_PATH=/app/artifacts/model_f_bundle.pkl
+      - AUDIT_LOG_PATH=/app/logs/audit.jsonl
+      - ENVIRONMENT=production
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./artifacts:/app/artifacts:ro
+      - ./logs:/app/logs:rw
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    container_name: abuse_ring_detector_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy volatile-lru
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  redis_data:
+    driver: local

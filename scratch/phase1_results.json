@@ -1,0 +1,9 @@
+{
+  "dependencies": true,
+  "model_artifact": true,
+  "checksum": "82e77daac0762a04",
+  "env_vars": true,
+  "container_config": true,
+  "missing_artifact_safety": true,
+  "restart_persistence": true
+}

@@ -1,0 +1,7 @@
+{
+  "health_probe": true,
+  "readiness_probe": true,
+  "liveness_probe": true,
+  "prometheus_metrics": true,
+  "pii_privacy": true
+}

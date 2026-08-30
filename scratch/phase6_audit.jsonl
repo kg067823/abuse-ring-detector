@@ -1,0 +1,1 @@
+{"order_id": "O_OBS_001", "risk_score": 0.01397984665701546, "calibrated_score": 0.01397984665701546, "alert": false, "threshold": 0.5, "model_version": "v1.0.0-ModelF", "schema_version": "v1.0.0", "latency_ms": 1410.0365999620408, "fallback_applied": false, "reason_codes": [], "timestamp": "2026-08-30T06:25:41Z", "correlation_id": "fdec12bf-1868-45c9-b77a-4f9d22567e50"}

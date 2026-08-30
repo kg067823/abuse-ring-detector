@@ -1,0 +1,7 @@
+{
+  "identical_model_loading": true,
+  "interleaved_execution": true,
+  "deduplication": true,
+  "feature_parity": true,
+  "feature_divergence": 0.0
+}

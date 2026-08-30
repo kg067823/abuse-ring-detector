@@ -13,3 +13,5 @@ reports/*
 !artifacts/.gitkeep
 !reports/.gitkeep
 .ipynb_checkpoints/
+.env
+*.env

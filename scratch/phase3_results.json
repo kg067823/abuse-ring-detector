@@ -1,0 +1,13 @@
+{
+  "single_instance_restart": true,
+  "multi_instance_restart": true,
+  "kill_switch_recovery": true,
+  "replay_deduplication": true,
+  "metrics": {
+    "downtime_sec": 0.0,
+    "failed_requests": 0,
+    "recovery_time_sec": 0.05,
+    "state_consistency_pct": 100.0,
+    "total_test_duration_sec": 2.071
+  }
+}

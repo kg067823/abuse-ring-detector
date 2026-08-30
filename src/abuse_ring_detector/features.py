@@ -17,6 +17,15 @@ def _manifest(columns: Iterable[str], source: str) -> pd.DataFrame:
                          "as_of_rule": "strictly earlier events only", "target_independent": True})
 
 
+def _clean_entity(val: Any) -> str:
+    if val is None or pd.isna(val):
+        return ""
+    s = str(val).strip()
+    if s.lower() in ("", "nan", "none", "null", "<na>", "0", "0.0"):
+        return ""
+    return s
+
+
 def build_baseline_features(orders: pd.DataFrame, labels: pd.DataFrame | None = None, history_days: int | None = 30) -> FeatureSet:
     """Build one feature row per order, reading state before the current event."""
     data = orders.sort_values(["event_time", "order_id"], kind="mergesort").reset_index(drop=True)
@@ -40,16 +49,19 @@ def build_baseline_features(orders: pd.DataFrame, labels: pd.DataFrame | None = 
             "hours_since_prior": (pd.Timestamp(row.event_time) - previous).total_seconds() / 3600 if previous else 9999.0,
             "amount": float(row.amount), "amount_vs_prior_avg": float(row.amount) / max(float(np.mean(prior_amounts)) if prior_amounts else float(row.amount), 1.0),
             "account_age_days": max(0.0, (pd.Timestamp(row.event_time) - pd.Timestamp("2025-01-01")).total_seconds() / 86400),
-            "prior_category_count": len(state["categories"]), "retry_count": float(row.retry_count),
+            "prior_category_count": len(state["categories"]), "retry_count": float(getattr(row, "retry_count", 0.0)),
         }
         for entity in ENTITY_COLUMNS:
+            ent_val = _clean_entity(getattr(row, entity, ""))
             values[f"prior_{entity[:-3]}count"] = float(len(state[f"n_{entity}"]))
-            values[f"{entity[:-3]}_is_new"] = float(getattr(row, entity) not in state[f"n_{entity}"])
+            values[f"{entity[:-3]}_is_new"] = float(bool(ent_val) and ent_val not in state[f"n_{entity}"])
         rows.append(values)
         state["times"].append((pd.Timestamp(row.event_time), float(row.amount)))
         state["categories"].add(row.merchant_category)
         for entity in ENTITY_COLUMNS:
-            state[f"n_{entity}"].add(getattr(row, entity))
+            ent_val = _clean_entity(getattr(row, entity, ""))
+            if ent_val:
+                state[f"n_{entity}"].add(ent_val)
     X = pd.DataFrame(rows).set_index("order_id")
     y = X.index.to_series().map(labels_by_id.is_abuse).astype(int) if labels_by_id is not None else pd.Series(index=X.index, dtype=int)
     return FeatureSet(X=X.drop(columns="customer_id"), y=y, ids=X.index.to_series(), manifest=_manifest(X.drop(columns="customer_id").columns, "orders/customer history"))
@@ -74,7 +86,12 @@ def build_graph_features(orders: pd.DataFrame, labels: pd.DataFrame | None = Non
         neighbor_accounts: set[str] = set()
         component_nodes: set[str] = {row.customer_id}
         for entity in ENTITY_COLUMNS:
-            value = str(getattr(row, entity))
+            value = _clean_entity(getattr(row, entity, ""))
+            if not value:
+                features[f"{entity[:-3]}_shared_accounts"] = 0.0
+                features[f"{entity[:-3]}_is_reused"] = 0.0
+                features[f"{entity[:-3]}_customer_degree"] = 0.0
+                continue
             prior_customers = entity_customers[entity].get(value, set())
             features[f"{entity[:-3]}_shared_accounts"] = float(len(prior_customers))
             features[f"{entity[:-3]}_is_reused"] = float(bool(prior_customers))
@@ -89,9 +106,10 @@ def build_graph_features(orders: pd.DataFrame, labels: pd.DataFrame | None = Non
         rows.append(features)
         times.append(now)
         for entity in ENTITY_COLUMNS:
-            value = str(getattr(row, entity))
-            customer_entities[row.customer_id][entity].add(value)
-            entity_customers[entity][value].add(row.customer_id)
+            value = _clean_entity(getattr(row, entity, ""))
+            if value:
+                customer_entities[row.customer_id][entity].add(value)
+                entity_customers[entity][value].add(row.customer_id)
     X = pd.DataFrame(rows).set_index("order_id")
     y = X.index.to_series().map(labels_by_id.is_abuse).astype(int) if labels_by_id is not None else pd.Series(index=X.index, dtype=int)
     return FeatureSet(X=X.drop(columns="customer_id"), y=y, ids=X.index.to_series(), manifest=_manifest(X.drop(columns="customer_id").columns, "historical customer-entity graph"))
@@ -130,6 +148,21 @@ def build_temporal_velocity_features(orders: pd.DataFrame, labels: pd.DataFrame 
 
         for entity_col in ENTITY_COLUMNS:
             entity_val = str(getattr(row, entity_col))
+            prefix = entity_col[:-3]
+            if not entity_val or entity_val in ("nan", "None"):
+                feature_dict[f"{prefix}_distinct_customers_1h"] = 0.0
+                feature_dict[f"{prefix}_distinct_customers_24h"] = 0.0
+                feature_dict[f"{prefix}_order_count_1h"] = 0.0
+                feature_dict[f"{prefix}_order_count_24h"] = 0.0
+                feature_dict[f"{prefix}_new_customers_1h"] = 0.0
+                feature_dict[f"{prefix}_burst_ratio_1h_24h"] = 0.0
+                distinct_1h_all.append(0.0)
+                distinct_24h_all.append(0.0)
+                order_count_1h_all.append(0.0)
+                order_count_24h_all.append(0.0)
+                burst_ratio_all.append(0.0)
+                continue
+
             hist = entity_history[entity_col][entity_val]
             first_seen_set = entity_first_seen_cust[entity_col][entity_val]
 
@@ -154,7 +187,6 @@ def build_temporal_velocity_features(orders: pd.DataFrame, labels: pd.DataFrame 
             hourly_avg_24h = max(1.0, orders_24h / 24.0)
             burst_ratio = orders_1h / hourly_avg_24h
 
-            prefix = entity_col[:-3]
             feature_dict[f"{prefix}_distinct_customers_1h"] = float(distinct_custs_1h)
             feature_dict[f"{prefix}_distinct_customers_24h"] = float(distinct_custs_24h)
             feature_dict[f"{prefix}_order_count_1h"] = float(orders_1h)
@@ -183,8 +215,9 @@ def build_temporal_velocity_features(orders: pd.DataFrame, labels: pd.DataFrame 
         # Update streaming state strictly after extracting features for current event
         for entity_col in ENTITY_COLUMNS:
             entity_val = str(getattr(row, entity_col))
-            entity_history[entity_col][entity_val].append((now, row.customer_id))
-            entity_first_seen_cust[entity_col][entity_val].add(row.customer_id)
+            if entity_val and entity_val not in ("nan", "None"):
+                entity_history[entity_col][entity_val].append((now, row.customer_id))
+                entity_first_seen_cust[entity_col][entity_val].add(row.customer_id)
 
     X = pd.DataFrame(rows).set_index("order_id")
     y = X.index.to_series().map(labels_by_id.is_abuse).astype(int) if labels_by_id is not None else pd.Series(index=X.index, dtype=int)
@@ -246,6 +279,17 @@ def build_customer_relative_features(orders: pd.DataFrame, labels: pd.DataFrame 
         for entity_col in ENTITY_COLUMNS:
             entity_val = curr_entities[entity_col]
             prefix = entity_col[:-3]
+
+            if not entity_val or entity_val in ("nan", "None"):
+                feature_dict[f"customer_{prefix}_orders_1h"] = 0.0
+                feature_dict[f"customer_{prefix}_orders_24h"] = 0.0
+                feature_dict[f"customer_{prefix}_orders_7d"] = 0.0
+                feature_dict[f"customer_{prefix}_velocity_ratio"] = 0.0
+                feature_dict[f"customer_{prefix}_share_of_activity_24h"] = 0.0
+                entity_orders_1h_list.append(0.0)
+                entity_orders_24h_list.append(0.0)
+                entity_velocity_ratio_list.append(0.0)
+                continue
 
             # Count customer's orders using this specific entity
             e_7d = sum(1 for t, e_map in hist if t > cutoff_7d and e_map.get(entity_col) == entity_val)
@@ -325,7 +369,7 @@ def build_two_hop_features(orders: pd.DataFrame, labels: pd.DataFrame | None = N
         cutoff_24h = now - pd.Timedelta(hours=24)
 
         curr_cust = row.customer_id
-        curr_entities = {col: str(getattr(row, col)) for col in ENTITY_COLUMNS}
+        curr_entities = {col: _clean_entity(getattr(row, col, "")) for col in ENTITY_COLUMNS}
         curr_d = curr_entities["device_id"]
         curr_a = curr_entities["address_id"]
         curr_ip = curr_entities["ip_id"]
@@ -344,6 +388,10 @@ def build_two_hop_features(orders: pd.DataFrame, labels: pd.DataFrame | None = N
 
         for col in ENTITY_COLUMNS:
             val = curr_entities[col]
+            if not val:
+                peers_by_entity_7d[col] = set()
+                peers_by_entity_30d[col] = set()
+                continue
             dq = entity_history[col][val]
             p_7d = {c for t, c in dq if t > cutoff_7d and c != curr_cust}
             p_30d = {c for t, c in dq if t > cutoff_30d and c != curr_cust}
@@ -493,7 +541,9 @@ def build_two_hop_features(orders: pd.DataFrame, labels: pd.DataFrame | None = N
         rows.append(feature_dict)
 
         for col in ENTITY_COLUMNS:
-            entity_history[col][curr_entities[col]].append((now, curr_cust))
+            val = curr_entities[col]
+            if val:
+                entity_history[col][val].append((now, curr_cust))
         customer_history[curr_cust].append((now, curr_entities))
 
     X = pd.DataFrame(rows).set_index("order_id")
@@ -536,14 +586,14 @@ def build_subgraph_features(orders: pd.DataFrame, labels: pd.DataFrame | None = 
         cutoff_1h = now - pd.Timedelta(hours=1)
 
         curr_cust = row.customer_id
-        curr_entities = {col: str(getattr(row, col)) for col in ENTITY_COLUMNS}
+        curr_entities = {col: _clean_entity(getattr(row, col, "")) for col in ENTITY_COLUMNS}
 
         # 1-Hop Customers & Entities in 7d and 24h
         custs_7d: set[str] = {curr_cust}
         custs_24h: set[str] = {curr_cust}
 
-        ents_7d: set[str] = set(curr_entities.values())
-        ents_24h: set[str] = set(curr_entities.values())
+        ents_7d: set[str] = set(v for v in curr_entities.values() if v and v not in ("nan", "None", "null"))
+        ents_24h: set[str] = set(v for v in curr_entities.values() if v and v not in ("nan", "None", "null"))
 
         edges_7d: set[tuple[str, str]] = set()
         edges_24h: set[tuple[str, str]] = set()
@@ -552,6 +602,8 @@ def build_subgraph_features(orders: pd.DataFrame, labels: pd.DataFrame | None = 
         direct_peers_7d: dict[str, set[str]] = {col: set() for col in ENTITY_COLUMNS}
         for col in ENTITY_COLUMNS:
             val = curr_entities[col]
+            if not val or val in ("nan", "None", "null"):
+                continue
             dq = entity_events[col][val]
             while dq and dq[0][0] <= cutoff_7d:
                 dq.popleft()
@@ -574,6 +626,8 @@ def build_subgraph_features(orders: pd.DataFrame, labels: pd.DataFrame | None = 
             for t, e_dict, _ in p_dq:
                 if t > cutoff_7d:
                     for col, e_val in e_dict.items():
+                        if not e_val or e_val in ("nan", "None", "null"):
+                            continue
                         ents_7d.add(e_val)
                         edges_7d.add((peer, e_val))
                         # Find 2-hop peers using e_val
@@ -593,6 +647,8 @@ def build_subgraph_features(orders: pd.DataFrame, labels: pd.DataFrame | None = 
         for t, e_dict, _ in customer_events[curr_cust]:
             if t > cutoff_7d:
                 for col, e_val in e_dict.items():
+                    if not e_val or e_val in ("nan", "None", "null"):
+                        continue
                     ents_7d.add(e_val)
                     edges_7d.add((curr_cust, e_val))
                     if t > cutoff_24h:
@@ -710,6 +766,8 @@ def build_subgraph_features(orders: pd.DataFrame, labels: pd.DataFrame | None = 
 
         for col in ENTITY_COLUMNS:
             val = curr_entities[col]
+            if not val or val in ("nan", "None", "null"):
+                continue
             if val not in node_first_seen:
                 node_first_seen[val] = now
             edge = (curr_cust, val)

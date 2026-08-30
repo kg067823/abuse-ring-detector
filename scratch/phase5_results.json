@@ -1,0 +1,62 @@
+[
+  {
+    "profile": "Low Load",
+    "requests": 100,
+    "concurrency": 10,
+    "total_time_sec": 15.112,
+    "throughput_rps": 6.62,
+    "latency_p50_ms": 1142.16,
+    "latency_p95_ms": 4633.56,
+    "latency_p99_ms": 4652.68,
+    "max_latency_ms": 4674.42,
+    "error_count": 0,
+    "error_rate_pct": 0.0,
+    "fallback_count": 0,
+    "fallback_rate_pct": 0.0
+  },
+  {
+    "profile": "Medium Load",
+    "requests": 250,
+    "concurrency": 25,
+    "total_time_sec": 21.866,
+    "throughput_rps": 11.43,
+    "latency_p50_ms": 2046.03,
+    "latency_p95_ms": 3098.62,
+    "latency_p99_ms": 3594.23,
+    "max_latency_ms": 3723.55,
+    "error_count": 0,
+    "error_rate_pct": 0.0,
+    "fallback_count": 0,
+    "fallback_rate_pct": 0.0
+  },
+  {
+    "profile": "High Load",
+    "requests": 500,
+    "concurrency": 50,
+    "total_time_sec": 67.106,
+    "throughput_rps": 7.45,
+    "latency_p50_ms": 6997.49,
+    "latency_p95_ms": 8245.85,
+    "latency_p99_ms": 8661.77,
+    "max_latency_ms": 9448.98,
+    "error_count": 0,
+    "error_rate_pct": 0.0,
+    "fallback_count": 0,
+    "fallback_rate_pct": 0.0
+  },
+  {
+    "profile": "Peak Load",
+    "requests": 1000,
+    "concurrency": 100,
+    "total_time_sec": 101.516,
+    "throughput_rps": 9.85,
+    "latency_p50_ms": 9888.35,
+    "latency_p95_ms": 11339.76,
+    "latency_p99_ms": 11918.44,
+    "max_latency_ms": 12538.06,
+    "error_count": 0,
+    "error_rate_pct": 0.0,
+    "fallback_count": 0,
+    "fallback_rate_pct": 0.0
+  }
+]

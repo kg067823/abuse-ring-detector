@@ -1,0 +1,11 @@
+{
+  "model_checksum_verified": true,
+  "feature_count_verified": true,
+  "threshold_verified": true,
+  "env_vars_verified": true,
+  "state_store_healthy": true,
+  "probes_verified": true,
+  "audit_destination_verified": true,
+  "kill_switch_verified": true,
+  "all_passed": true
+}

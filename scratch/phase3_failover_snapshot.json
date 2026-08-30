@@ -1,0 +1,62 @@
+{
+  "version": "v1.0.0",
+  "timestamp": "2026-08-30T22:31:42Z",
+  "records": [
+    {
+      "order_id": "O_FAIL_001",
+      "customer_id": "C_FAIL_101",
+      "event_time": "2025-06-05 11:00:00",
+      "amount": 1500.0,
+      "currency": "INR",
+      "device_id": "D_FAIL_1",
+      "ip_id": "",
+      "address_id": "",
+      "payment_id": "",
+      "merchant_category": "general",
+      "retry_count": 0.0
+    },
+    {
+      "order_id": "O_FAIL_002",
+      "customer_id": "C_FAIL_101",
+      "event_time": "2025-06-05 11:02:00",
+      "amount": 2500.0,
+      "currency": "INR",
+      "device_id": "D_FAIL_1",
+      "ip_id": "",
+      "address_id": "",
+      "payment_id": "",
+      "merchant_category": "general",
+      "retry_count": 0.0
+    }
+  ],
+  "processed_orders": {
+    "O_FAIL_001": {
+      "order_id": "O_FAIL_001",
+      "risk_score": 0.008408569502473259,
+      "calibrated_score": 0.008408569502473259,
+      "alert": false,
+      "threshold": 0.5,
+      "model_version": "v1.0.0-ModelF",
+      "schema_version": "v1.0.0",
+      "latency_ms": 1764.78730000008,
+      "fallback_applied": false,
+      "reason_codes": [],
+      "timestamp": "2026-08-30T22:31:42Z",
+      "correlation_id": ""
+    },
+    "O_FAIL_002": {
+      "order_id": "O_FAIL_002",
+      "risk_score": 0.3963106083282504,
+      "calibrated_score": 0.3963106083282504,
+      "alert": false,
+      "threshold": 0.5,
+      "model_version": "v1.0.0-ModelF",
+      "schema_version": "v1.0.0",
+      "latency_ms": 87.61110000000372,
+      "fallback_applied": false,
+      "reason_codes": [],
+      "timestamp": "2026-08-30T22:31:42Z",
+      "correlation_id": ""
+    }
+  }
+}

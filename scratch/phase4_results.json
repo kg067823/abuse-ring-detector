@@ -1,0 +1,10 @@
+{
+  "audit_logs_verified": false,
+  "total_events": 500,
+  "feature_parity_rate_pct": 100.0,
+  "mean_score_diff": 0.0,
+  "max_score_diff": 0.0,
+  "decision_diffs": 0,
+  "fallback_count": 0,
+  "throughput_rps": 3.44
+}
