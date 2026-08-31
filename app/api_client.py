@@ -41,7 +41,15 @@ class CommandCenterClient:
     def health(self): return self._request("GET", "/health")
     def readiness(self): return self._request("GET", "/readiness")
     def liveness(self): return self._request("GET", "/liveness")
-    def metrics(self): return self._request("GET", "/metrics")
+    def metrics(self):
+        try:
+            response = __import__("requests").get(self.base_url + "/metrics", timeout=self.timeout)
+            if response.status_code >= 400:
+                raise ApiError(f"HTTP {response.status_code}", response.status_code)
+            return response.text
+        except __import__("requests").RequestException as exc:
+            raise ApiError(f"API unavailable: {exc}") from exc
+    def predict(self, payload: dict[str, Any]): return self._request("POST", "/v1/predict", json=payload, headers={"X-Correlation-ID": payload.get("order_id", "")})
     def alerts(self, min_risk: float | None = None):
         return self._request("GET", "/v1/alerts", params={"min_risk": min_risk} if min_risk is not None else {})
     def cases(self, status: str | None = None, severity: str | None = None, min_risk: float | None = None):

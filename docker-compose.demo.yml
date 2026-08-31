@@ -1,0 +1,17 @@
+services:
+  api:
+    command: ["uvicorn", "abuse_ring_detector.api:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+    environment:
+      DEMO_MODE: "true"
+  frontend:
+    image: abuse-ring-detector-api
+    working_dir: /app
+    command: ["streamlit", "run", "app/command_center.py", "--server.address", "0.0.0.0", "--server.port", "8501"]
+    environment:
+      ABUSERING_API_URL: http://api:8000
+      ABUSERING_MODE: demo
+    ports:
+      - "8501:8501"
+    depends_on:
+      api:
+        condition: service_started

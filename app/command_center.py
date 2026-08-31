@@ -18,6 +18,7 @@ if str(APP) not in sys.path:
     sys.path.insert(0, str(APP))
 from api_client import ApiError, CommandCenterClient
 from command_center_helpers import aggregate_cases, filter_items, graph_counts, timeline_sorted
+from demo_scenarios import SCENARIOS, scenario_payloads
 
 st.set_page_config(page_title="AbuseRing Command Center", page_icon="◈", layout="wide", initial_sidebar_state="expanded")
 st.markdown("""
@@ -81,12 +82,30 @@ if page == "System Health":
     st.stop()
 
 if page == "Demo Mode":
-    st.markdown('<div class="hero"><div class="eyebrow">Demo / synthetic replay</div><h1>Build the network</h1><p>Replay coordinated scenarios through the real R1 API. No case objects are hard-coded in the UI.</p></div>', unsafe_allow_html=True)
+    st.markdown('<div class="hero"><div class="eyebrow">Demo / synthetic replay</div><h1>Build the network</h1><p>Individually plausible events become an observable investigation case through the real R1 API.</p></div>', unsafe_allow_html=True)
     st.warning("DEMO / SYNTHETIC DATA — these records are not live production evidence.")
-    scenario = st.selectbox("Scenario", ["Shared-device ring", "Shared-address ring", "Mixed multi-entity", "Behavioral coordination", "Legitimate high-connectivity"])
-    if st.button("Run Abuse Scenario", type="primary"):
-        st.info("Use `scratch/run_investigator_demo.py` to replay this scenario through /v1/predict, then refresh this page. The frontend never bypasses Model F-R1.")
-        st.code(f".venv/bin/python scratch/run_investigator_demo.py --scenario '{scenario}'", language="bash")
+    scenario = st.selectbox("Scenario", SCENARIOS, index=2)
+    run_id = st.text_input("Replay ID", "demo-001", help="Use a new ID for a fresh replay; repeated IDs exercise backend idempotency.")
+    if st.button("RUN SCENARIO", type="primary"):
+        progress = st.empty(); results = []
+        try:
+            for index, payload in enumerate(scenario_payloads(scenario, run_id), start=1):
+                response = client.predict(payload)
+                cases_now = client.cases().get("items", [])
+                results.append(response)
+                state = "Risk emerging" if response.get("alert") else "Observed signal"
+                progress.info(f"Event {index} of 8 · {state} · score {response.get('calibrated_score', 0):.3f} · {len(cases_now)} case(s)")
+            final_cases = client.cases().get("items", [])
+            st.success(f"Replay complete · {sum(bool(row.get('alert')) for row in results)} alert(s) · {len(final_cases)} case(s) returned")
+            st.json({"label": "DEMO / SYNTHETIC", "scenario": scenario, "progression": [{"event": i + 1, "score": row.get("calibrated_score"), "alert": row.get("alert"), "fallback": row.get("fallback_applied")} for i, row in enumerate(results)]})
+            if final_cases:
+                st.session_state["selected_case"] = final_cases[0].get("case_id")
+                st.info("Case created. Open Case Workspace to inspect evidence, graph, and timeline.")
+            elif scenario == "Legitimate high-connectivity":
+                st.info("Control result: shared infrastructure alone is not enough. No case was returned by the backend.")
+        except ApiError as exc:
+            st.error(f"Scenario stopped safely: {exc}")
+    st.caption("The runner uses /v1/predict only; no model or case object is fabricated in the UI.")
     st.stop()
 
 try:
@@ -148,7 +167,9 @@ elif page == "Investigation Cases":
 elif page in {"Case Workspace", "Network Explorer"}:
     st.markdown('<div class="hero"><div class="eyebrow">Investigator workspace</div><h1>Understand the ring.</h1><p>Observed evidence associated with elevated risk — never causal attribution.</p></div>', unsafe_allow_html=True)
     if not cases: st.info("No cases found. Run the deterministic demo replay to create cases."); st.stop()
-    selected = st.selectbox("Case", [case.get("case_id") for case in cases])
+    case_ids = [case.get("case_id") for case in cases]
+    default_index = case_ids.index(st.session_state.get("selected_case")) if st.session_state.get("selected_case") in case_ids else 0
+    selected = st.selectbox("Case", case_ids, index=default_index)
     try:
         case = client.case(selected); evidence = client.evidence(selected); timeline = client.timeline(selected); graph = client.graph(selected)
     except ApiError as exc: st.error(str(exc)); st.stop()
@@ -156,7 +177,13 @@ elif page in {"Case Workspace", "Network Explorer"}:
     st.info("Observed evidence associated with elevated risk. These signals are not causal proof.")
     if page == "Network Explorer":
         st.subheader("Network explorer"); st.caption(f'{graph_counts(graph)["nodes"]} nodes · {graph_counts(graph)["edges"]} edges')
-        st.graphviz_chart("graph {\n" + "\n".join(f'"{edge["source"]}" -- "{edge["target"]}" [label="{edge["relationship"]}"];' for edge in graph.get("edges", [])) + "\n}")
+        legend = {"customer": "● Customer", "order": "■ Order", "device_id": "◆ Device", "address_id": "◆ Address", "ip_id": "◆ IP", "payment_id": "◆ Payment"}
+        st.caption(" · ".join(legend.values()))
+        dot = "graph {\nnode [fontname=Helvetica, style=filled, color=\"#4fd1c5\"];\n" + "\n".join(f'"{node["id"]}" [label="{legend.get(node.get("type"), node.get("type"))}\\n{node["id"][-8:]}"];' for node in graph.get("nodes", [])) + "\n" + "\n".join(f'"{edge["source"]}" -- "{edge["target"]}" [label="{edge["relationship"]}"];' for edge in graph.get("edges", [])) + "\n}"
+        try:
+            st.graphviz_chart(dot, use_container_width=True)
+        except Exception:
+            st.warning("Graph rendering is unavailable; showing the relationship table instead.")
         st.dataframe(graph.get("nodes", []), use_container_width=True, hide_index=True)
     else:
         left,right=st.columns([1.2,1])
