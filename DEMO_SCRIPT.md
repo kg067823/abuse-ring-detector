@@ -1,5 +1,13 @@
 # AbuseRing three-minute demo script
 
+## Presenter headline
+
+**Fraud systems inspect transactions. AbuseRing investigates networks.**
+
+Primary scenario: **Mixed multi-entity**. The demo uses the real R1 API and
+backend case pipeline. Results are model-dependent; never promise a specific
+alert count or case if the API does not return one.
+
 ## Setup
 
 From the repository root:
@@ -27,19 +35,24 @@ the transaction.”
 ## 0:20–0:45 — Plausible events
 
 Open **Demo Mode** and choose **Mixed multi-entity**. Explain that the replay
-uses ordinary-looking amounts and customers, then progressively shares device,
-address, IP, and payment infrastructure.
+uses ordinary-looking amounts and customers with shared device, address, IP,
+and payment relationships. The exact score and case outcome come from the
+frozen R1 pipeline.
 
 ## 0:45–1:20 — Network forms
 
-Click **RUN SCENARIO**. Point to the `Event n of 8` progression, score, alert,
-and case counts. The UI is sending every event through the real `/v1/predict`
+Click **RUN SCENARIO**. Point to the `Event n of 8` progression, score, alert, and cases returned so far
+from the backend. Use a fresh replay ID; prior demo state may remain in the
+process-local case repository. The UI is sending every event through the real `/v1/predict`
 endpoint and waiting for the backend case API; it is not fabricating cases.
 
-## 1:20–1:50 — Case appears
+## 1:20–1:50 — Case or alert outcome
 
-Open **Case Workspace** and select the returned case. Highlight severity, risk,
-alert count, related customers, and **observed exposure**.
+If the backend returns a case, open **Case Workspace** and select it. Highlight
+severity, risk, alert count, related customers, and **observed exposure**. If no
+qualifying alert/case is returned, stay on the alert/evidence state and say that
+the locked R1 pipeline did not create a case for this replay; do not fabricate
+one.
 
 Say: “The score is a shadow signal for analyst review. No customer transaction
 is blocked or modified.”

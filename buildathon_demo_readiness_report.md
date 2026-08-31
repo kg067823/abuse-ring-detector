@@ -3,7 +3,7 @@
 ## Verdict
 
 ```text
-DEMO_READY: YES (local API/UI flow and tests verified)
+DEMO_READY: YES (local API/UI scope; not live-production readiness)
 LIVE_PRODUCTION_OBSERVATION: NOT_STARTED
 CANARY_STAGE_1: BLOCKED
 ENFORCEMENT: DISABLED

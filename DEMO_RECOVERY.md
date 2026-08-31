@@ -1,5 +1,13 @@
 # Demo recovery guide
 
+## Presenter fallback in 20 seconds
+
+- **Live flow works:** run Mixed multi-entity and open the returned case.
+- **Graph fails:** show the evidence cards, timeline, and relationship table.
+- **Replay fails:** confirm `/readiness`, use a fresh replay ID, and rerun; never fabricate a case.
+- **Backend fails:** restart with `ADMIN_KILL_SWITCH_TOKEN=demo-secret .venv/bin/python scripts/start_demo.py --docker`.
+- **No recovery:** state that this is DEMO / SYNTHETIC and shadow-only; do not present stale or fabricated production evidence.
+
 ## Docker does not start
 
 Verify Docker Desktop is running and the R1 artifact exists:

@@ -19,6 +19,20 @@ PYTHONPATH=src python -m abuse_ring_detector.cli run-poc --config configs/defaul
 
 ## AbuseRing Command Center
 
+**WHAT:** AbuseRing turns coordinated abuse signals into investigator-ready
+network cases. **WHY:** individually plausible transactions can share hidden
+infrastructure and timing. **HOW:** frozen Model F-R1 combines strict temporal,
+graph, customer-relative, two-hop, and subgraph evidence, then consolidates
+shadow alerts into masked cases with evidence, graph, and timeline context.
+**RESULT:** on the reconstructed chronological held-out synthetic R1 test split,
+PR-AUC was 0.79812, precision 0.91874, recall 0.63994, and F1 0.75440 at the
+locked 0.50 threshold. **SAFETY:** `SHADOW_MODE=true`,
+`ENFORCE_DECISIONS=false`; no customer enforcement is enabled. These are not
+Razorpay production results and live observation remains not started.
+
+Presentation artifacts: `PITCH_SCRIPT.md`, `JUDGE_QA.md`,
+`PRESENTATION_METRICS.md`, and `ARCHITECTURE_PITCH.md`.
+
 Run the API and Redis stack with an explicit local admin token:
 
 ```bash
