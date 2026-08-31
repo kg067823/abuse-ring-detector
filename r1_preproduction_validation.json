@@ -1,0 +1,35 @@
+{
+  "validation_scope": "LOCAL_OR_STAGING_ONLY",
+  "r1": {
+    "version": "model_f_r1",
+    "checksum": "3f8bae638c6e81d0b391f9b226385e855ceb09744d774ea2d24cb9d0375c7cff",
+    "features": 137,
+    "threshold": 0.5,
+    "calibration": "isotonic_regression"
+  },
+  "checks": {
+    "artifact_contract": {
+      "status": "PASS",
+      "checksum": "3f8bae638c6e81d0b391f9b226385e855ceb09744d774ea2d24cb9d0375c7cff",
+      "feature_count": 137
+    },
+    "seven_day_status": {
+      "status": "PASS",
+      "live_production_observation": "NOT_STARTED",
+      "qualifying_days": "0/7",
+      "canary_stage_1": "BLOCKED"
+    },
+    "runtime": {
+      "status": "BLOCKED",
+      "reason": "[Errno 54] Connection reset by peer"
+    },
+    "docker": {
+      "status": "NOT_RUN",
+      "note": "Run docker compose separately when daemon validation is required."
+    }
+  },
+  "enforcement": "DISABLED",
+  "live_production_observation": "NOT_STARTED",
+  "qualifying_days": "0/7",
+  "canary_stage_1": "BLOCKED"
+}

@@ -8,6 +8,8 @@ data/raw/*
 data/processed/*
 artifacts/*
 reports/*
+!reports/production_drift_monitoring_policy.json
+!reports/experiment_reconciliation_manifest.json
 !artifacts/model_f_r1_bundle.pkl
 !data/raw/.gitkeep
 !data/processed/.gitkeep

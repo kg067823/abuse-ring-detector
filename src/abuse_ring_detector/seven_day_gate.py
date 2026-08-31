@@ -9,6 +9,9 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Literal, Optional
 
+R1_CHECKSUM = "3f8bae638c6e81d0b391f9b226385e855ceb09744d774ea2d24cb9d0375c7cff"
+R1_FEATURE_COUNT = 137
+
 DATA_SOURCE_TYPE = Literal["REAL_LIVE_PRODUCTION", "STAGING_REPLAY", "SIMULATION", "UNAVAILABLE"]
 
 @dataclass
@@ -24,6 +27,7 @@ class DailyObservationRecord:
     feature_count: int
     incidents_count: int = 0
     pii_violations: int = 0
+    target_checksum: Optional[str] = None
 
     @property
     def is_qualifying_live_production_day(self) -> bool:
@@ -34,9 +38,10 @@ class DailyObservationRecord:
     def passes_safety_thresholds(self) -> bool:
         if self.blocked_transactions > 0:
             return False
-        if len(self.model_checksum) != 64 or self.model_checksum == "82e77daac0762a04":
+        expected_checksum = self.target_checksum or R1_CHECKSUM
+        if self.model_checksum != expected_checksum or len(self.model_checksum) != 64:
             return False
-        if self.feature_count != 137:
+        if self.feature_count != R1_FEATURE_COUNT:
             return False
         if self.pii_violations > 0:
             return False

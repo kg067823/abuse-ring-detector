@@ -19,6 +19,7 @@ from fastapi import FastAPI, Header, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from .explain import explain_prediction, mask_identifier
 from .inference import (
     R1_MODEL_VERSION,
     R1_THRESHOLD,
@@ -163,6 +164,17 @@ class KillSwitchRequest(BaseModel):
     active: bool = Field(..., description="Enable or disable emergency kill switch")
 
 
+class AdminAuthError(HTTPException):
+    def __init__(self):
+        super().__init__(status_code=401, detail="admin authentication required")
+
+
+def require_admin_token(authorization: str | None) -> None:
+    expected = os.getenv("ADMIN_KILL_SWITCH_TOKEN")
+    if not expected or authorization != f"Bearer {expected}":
+        raise AdminAuthError()
+
+
 # --- Middlewares & Exception Handlers ---
 
 @app.middleware("http")
@@ -266,6 +278,33 @@ def predict_transaction(payload: TransactionApiPayload, request: Request, x_corr
     return resp
 
 
+@app.post("/v1/explain", status_code=status.HTTP_200_OK)
+def explain_transaction(payload: TransactionApiPayload, request: Request, x_correlation_id: str | None = Header(None)):
+    """Return masked, non-causal observed signals for a shadow investigation."""
+    corr_id = x_correlation_id or getattr(request.state, "correlation_id", str(uuid.uuid4()))
+    service = get_service()
+    domain_payload = TransactionPayload(
+        order_id=payload.order_id, customer_id=payload.customer_id, event_time=payload.event_time,
+        amount=payload.amount, currency=payload.currency, device_id=payload.device_id,
+        ip_id=payload.ip_id, address_id=payload.address_id, payment_id=payload.payment_id,
+        merchant_category=payload.merchant_category, retry_count=payload.retry_count,
+    )
+    if domain_payload.validate():
+        raise HTTPException(status_code=422, detail="invalid transaction payload")
+    feature_row = service.feature_store.compute_as_of_features(domain_payload, service.feature_names)
+    response = service.score_transaction(domain_payload, correlation_id=corr_id)
+    result = explain_prediction(feature_row, response.calibrated_score, model_version=response.model_version, model_checksum=service.model_checksum)
+    result.update({
+        "order_id": mask_identifier(payload.order_id),
+        "customer_id": mask_identifier(payload.customer_id),
+        "event_time": str(payload.event_time),
+        "threshold": response.threshold,
+        "shadow_alert": response.alert,
+        "correlation_id": corr_id,
+    })
+    return result
+
+
 @app.get("/metrics", status_code=status.HTTP_200_OK)
 def get_metrics():
     """Retrieve operational and latency metrics in Prometheus exposition format."""
@@ -308,11 +347,12 @@ def get_metrics():
 
 
 @app.post("/v1/admin/kill-switch", status_code=status.HTTP_200_OK)
-def toggle_kill_switch(req: KillSwitchRequest):
+def toggle_kill_switch(req: KillSwitchRequest, authorization: str | None = Header(None)):
     """Dynamically activate or deactivate emergency scoring kill-switch."""
+    require_admin_token(authorization)
     service = get_service()
     service.set_kill_switch(req.active)
-    logger.warning(f"Kill switch status updated to active={req.active}")
+    logger.warning("Kill switch status updated; active=%s", req.active)
     return {
         "status": "updated",
         "kill_switch_active": req.active,

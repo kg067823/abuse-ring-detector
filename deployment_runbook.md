@@ -68,7 +68,7 @@ curl -s http://localhost:8000/health
 # {
 #   "status": "healthy",
 #   "service": "abuse-ring-detector",
-#   "model_version": "v1.0.0-ModelF",
+#   "model_version": "model_f_r1",
 #   "schema_version": "v1.0.0",
 #   "kill_switch_active": false
 # }
@@ -172,7 +172,7 @@ Every scoring event appends an immutable JSON record:
   "timestamp": "2026-08-30T06:25:41Z",
   "order_id": "O_OBS_001",
   "customer_id": "C_OBS_101",
-  "model_version": "v1.0.0-ModelF",
+  "model_version": "model_f_r1",
   "schema_version": "v1.0.0",
   "risk_score": 0.0027,
   "calibrated_score": 0.0027,

@@ -38,8 +38,8 @@ def setup_backend(tmp_path_factory):
         model=model_f,
         feature_names=feature_names,
         threshold=0.50,
-        model_version="v1.0.0-ModelF",
-        schema_version="v1.0.0",
+        model_version="model_f_r1",
+        schema_version="inference_contract_r1.v1",
         audit_log_path=audit_log
     )
     return service, feature_names, fs_all, split.test, orders, audit_log
@@ -203,8 +203,8 @@ def test_model_version_mismatch(setup_backend):
         order_id="VER_001", customer_id="C_VER", event_time="2025-06-18T10:00:00", amount=100.0
     )
     resp = service.score_transaction(p)
-    assert resp.model_version == "v1.0.0-ModelF"
-    assert resp.schema_version == "v1.0.0"
+    assert resp.model_version == "model_f_r1"
+    assert resp.schema_version == "inference_contract_r1.v1"
 
 
 def test_emergency_kill_switch_behavior(setup_backend):

@@ -21,6 +21,7 @@ services:
       - SHADOW_MODE=true
       - ENFORCE_DECISIONS=false
       - KILL_SWITCH=false
+      - ADMIN_KILL_SWITCH_TOKEN=${ADMIN_KILL_SWITCH_TOKEN:?ADMIN_KILL_SWITCH_TOKEN must be set}
     depends_on:
       redis:
         condition: service_healthy

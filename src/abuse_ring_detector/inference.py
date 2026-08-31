@@ -74,8 +74,8 @@ def save_model_artifact(model_bundle: Any, filepath: str | Path) -> str:
     meta_path = path.with_suffix(".json")
     with open(meta_path, "w") as f:
         json.dump({
-            "model_version": "v1.0.0-ModelF",
-            "schema_version": "v1.0.0",
+            "model_version": R1_MODEL_VERSION,
+            "schema_version": "inference_contract_r1.v1",
             "checksum": checksum,
             "feature_count": len(getattr(model_bundle, "feature_columns", [])),
             "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -248,8 +248,8 @@ class ProductionInferenceService:
         feature_names: list[str],
         calibrator: Any = None,
         threshold: float = 0.50,
-        model_version: str = "v1.0.0-ModelF",
-        schema_version: str = "v1.0.0",
+        model_version: str = R1_MODEL_VERSION,
+        schema_version: str = "inference_contract_r1.v1",
         fallback_risk_score: float = 0.05,
         state_store: BaseFeatureStateStore | None = None,
         audit_log_path: str | Path | None = None,
@@ -285,15 +285,18 @@ class ProductionInferenceService:
     def score_transaction(self, payload: TransactionPayload, correlation_id: str = "") -> InferenceResponse:
         t0 = time.perf_counter()
         
-        # Idempotency check
-        if self.state_store.is_order_processed(payload.order_id):
+        # Atomic idempotency claim across workers/backends.
+        if not self.state_store.claim_order_processed(payload.order_id):
             self.duplicate_count += 1
             cached = self.state_store.get_cached_response(payload.order_id)
-            if cached and isinstance(cached, dict):
+            if cached and isinstance(cached, dict) and "risk_score" not in cached and hasattr(self.state_store, "wait_for_cached_response"):
+                cached = self.state_store.wait_for_cached_response(payload.order_id)
+            if cached and isinstance(cached, dict) and "risk_score" in cached:
                 resp = InferenceResponse(**cached)
                 resp.latency_ms = (time.perf_counter() - t0) * 1000.0
                 resp.correlation_id = correlation_id or resp.correlation_id
                 return resp
+            return self._build_fallback_response(payload.order_id, t0, ["duplicate_in_flight"], correlation_id)
 
         self.total_processed_count += 1
 

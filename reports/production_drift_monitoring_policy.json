@@ -1,0 +1,7 @@
+{
+  "policy_version": "r1.v1",
+  "feature_drift_thresholds": [
+    {"feature_name": "prior_paymentcount", "known_high_drift": true, "historical_psi": 0.76, "green_max": 0.10, "warning_max": 0.25}
+  ],
+  "scope": "R1 pre-production monitoring policy; historical PSI is not live evidence."
+}

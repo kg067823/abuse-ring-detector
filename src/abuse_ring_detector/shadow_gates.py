@@ -25,25 +25,25 @@ class ShadowSafetyGateEvaluator:
     EXPECTED_FEATURE_COUNT = 137
     EXPECTED_THRESHOLD = 0.50
 
-    def __init__(self, shadow_log_path: str | Path | None = None):
+    def __init__(self, shadow_log_path: str | Path | None = None, contract_path: str | Path = "inference_contract_r1.json"):
         self.shadow_log_path = Path(shadow_log_path) if shadow_log_path else None
+        contract = json.loads(Path(contract_path).read_text())
+        self.expected_checksum = contract["artifact_sha256"]
+        self.expected_feature_names = contract["feature_names"]
 
     def evaluate_model_integrity(self, service_metrics: dict[str, Any], model_bundle: Any = None) -> dict[str, Any]:
         """Check 1 & 2: Model Checksum & 137-Feature Contract Integrity."""
         actual_checksum = service_metrics.get("model_checksum", "")
-        checksum_match = (
-            actual_checksum.startswith(self.EXPECTED_CHECKSUM) or
-            self.EXPECTED_CHECKSUM.startswith(actual_checksum)
-        )
+        checksum_match = actual_checksum == self.expected_checksum and len(actual_checksum) == 64
 
-        feature_cols = getattr(model_bundle, "feature_columns", []) if model_bundle else []
-        feat_count_ok = len(feature_cols) == self.EXPECTED_FEATURE_COUNT if feature_cols else True
+        feature_cols = list(getattr(model_bundle, "feature_columns", [])) if model_bundle else []
+        feat_count_ok = feature_cols == self.expected_feature_names
 
         return {
             "title": "Model Checksum & 137-Feature Contract Integrity",
             "passed": checksum_match and feat_count_ok,
             "status": "PASS" if (checksum_match and feat_count_ok) else "FAIL",
-            "details": f"Checksum={actual_checksum[:16]} (Expected={self.EXPECTED_CHECKSUM}), FeatureCount={len(feature_cols) if feature_cols else 137}"
+            "details": f"Checksum={actual_checksum} (Expected={self.expected_checksum}), FeatureCount={len(feature_cols)}"
         }
 
     def evaluate_non_enforcement_guarantee(self, shadow_logs: list[dict[str, Any]]) -> dict[str, Any]:

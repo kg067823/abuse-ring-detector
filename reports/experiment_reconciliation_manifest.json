@@ -1,0 +1,9 @@
+{
+  "manifest_version": "r1.v1",
+  "experiments": [
+    {"experiment_id": "EXP-001", "status": "historical_archival"},
+    {"experiment_id": "EXP-002", "status": "historical_archival"}
+  ],
+  "authoritative_experiment_id": "EXP-002-AUDITED-STRENGTHENED-5WAY",
+  "scope": "Historical experiment reconciliation only; not R1 model evidence."
+}

@@ -59,7 +59,7 @@ def test_no_holdout_leakage_during_model_selection():
 
 def test_model_freeze_reproducibility():
     """Verify model freeze manifest exists and feature count matches current model baseline (137 features)."""
-    manifest_path = Path("reports/model_f_freeze_manifest.json")
+    manifest_path = Path("model_f_r1_manifest.json")
     assert manifest_path.exists(), "Model freeze manifest does not exist!"
     
     with open(manifest_path, "r") as f:
@@ -67,7 +67,8 @@ def test_model_freeze_reproducibility():
         
     assert manifest["feature_count"] == 137, f"Expected 137 frozen features, got {manifest['feature_count']}"
     assert manifest["threshold"] == 0.50, f"Expected validation-locked threshold 0.50, got {manifest['threshold']}"
-    assert manifest["random_seed"] == 42, "Random seed mismatch in freeze manifest"
+    assert manifest["seed"] == 42, "Random seed mismatch in R1 manifest"
+    assert manifest["model_version"] == "model_f_r1"
 
 
 def test_calibration_fitting_isolation():

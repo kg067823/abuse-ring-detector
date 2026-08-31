@@ -967,7 +967,7 @@ REDIS_URL=redis://localhost:6379/0
 
 ## Key Capabilities & Safety Guarantees
 1. **Zero Customer Traffic Blocking**: In shadow mode, risk predictions are recorded strictly to audit streams (`logs/audit.jsonl`). API responses return `action: "SHADOW_LOG_ONLY"` or `action: "ALLOW"`. Zero transactions are blocked or delayed.
-2. **Phase 5 Safety Gate Evaluator**: Automated gate evaluator ([`src/abuse_ring_detector/shadow_gates.py`](file:///C:/Users/kg067/OneDrive/Desktop/Hackathon/abuse-ring-detector/src/abuse_ring_detector/shadow_gates.py)) checks model checksum (`82e77daac0762a04`), 137 features, PII masking compliance, error/fallback rates, and latency SLA.
+2. **Phase 5 Safety Gate Evaluator**: Automated gate evaluator loads the exact R1 checksum from `inference_contract_r1.json`, checks 137 ordered features, PII masking compliance, error/fallback rates, and latency SLA.
 3. **Delayed Ground-Truth Evaluation Pipeline**: Evaluator ([`src/abuse_ring_detector/shadow_evaluator.py`](file:///C:/Users/kg067/OneDrive/Desktop/Hackathon/abuse-ring-detector/src/abuse_ring_detector/shadow_evaluator.py)) joins predictions with ground-truth dispute/chargeback labels to measure PR-AUC, ROC-AUC, Precision, Recall, FPR, FNR, Exposure Captured vs. Missed, and Ring Recall.
 4. **Master Validation Runner**: Execute `scratch/run_shadow_observation_validation.py` to programmatically evaluate all shadow safety gates and observation metrics.
 

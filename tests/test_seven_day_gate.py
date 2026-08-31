@@ -17,7 +17,7 @@ def test_staging_replay_days_are_rejected():
             fallback_count=0,
             blocked_transactions=0,
             p95_latency_ms=15.0,
-            model_checksum="82e77daac0762a04",
+            model_checksum="3f8bae638c6e81d0b391f9b226385e855ceb09744d774ea2d24cb9d0375c7cff",
             feature_count=137
         )
         for i in range(7)
@@ -38,7 +38,7 @@ def test_in_progress_live_observation():
             fallback_count=0,
             blocked_transactions=0,
             p95_latency_ms=18.0,
-            model_checksum="82e77daac0762a04",
+            model_checksum="3f8bae638c6e81d0b391f9b226385e855ceb09744d774ea2d24cb9d0375c7cff",
             feature_count=137
         )
         for i in range(3)
@@ -59,7 +59,7 @@ def test_full_7_day_live_gate_pass():
             fallback_count=0,
             blocked_transactions=0,
             p95_latency_ms=18.0,
-            model_checksum="82e77daac0762a04",
+            model_checksum="3f8bae638c6e81d0b391f9b226385e855ceb09744d774ea2d24cb9d0375c7cff",
             feature_count=137
         )
         for i in range(7)
@@ -80,7 +80,7 @@ def test_customer_blocking_triggers_no_go():
             fallback_count=0,
             blocked_transactions=1,  # VIOLATION!
             p95_latency_ms=18.0,
-            model_checksum="82e77daac0762a04",
+            model_checksum="3f8bae638c6e81d0b391f9b226385e855ceb09744d774ea2d24cb9d0375c7cff",
             feature_count=137
         )
     ]

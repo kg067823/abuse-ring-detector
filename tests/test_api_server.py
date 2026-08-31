@@ -5,33 +5,29 @@ import pytest
 from fastapi.testclient import TestClient
 
 from abuse_ring_detector.api import app, set_service
-from abuse_ring_detector.config import load_config
-from abuse_ring_detector.features import build_subgraph_extended_features
-from abuse_ring_detector.inference import ProductionInferenceService
-from abuse_ring_detector.models import fit_model
-from abuse_ring_detector.synthetic import generate_ecosystem
+from abuse_ring_detector.inference import ProductionInferenceService, load_model_artifact
+from abuse_ring_detector.state import InMemoryFeatureStateStore
 
 
 @pytest.fixture(scope="module")
 def api_client(tmp_path_factory):
-    config = load_config("configs/default.yaml")
-    dataset = generate_ecosystem(config)
-    orders = dataset.orders.head(100)
-    labels = dataset.labels
-
-    fs_all = build_subgraph_extended_features(orders, labels, config.graph["history_days"])
-    feature_names = fs_all.X.columns.tolist()
-
-    model_f = fit_model(fs_all.X, fs_all.y, config.model["backend"], config.seed)
-    model_f.feature_columns = feature_names
+    model_f, _ = load_model_artifact(
+        "artifacts/model_f_r1_bundle.pkl",
+        require_frozen_contract=True,
+        manifest_path="model_f_r1_manifest.json",
+        contract_path="inference_contract_r1.json",
+    )
+    feature_names = model_f.feature_columns
 
     audit_log = tmp_path_factory.mktemp("logs") / "api_audit.jsonl"
     service = ProductionInferenceService(
         model=model_f,
         feature_names=feature_names,
         threshold=0.50,
-        model_version="v1.0.0-ModelF",
-        schema_version="v1.0.0",
+        calibrator=model_f.calibrator,
+        model_version="model_f_r1",
+        schema_version="inference_contract_r1.v1",
+        state_store=InMemoryFeatureStateStore(),
         audit_log_path=audit_log
     )
 
@@ -77,7 +73,7 @@ def test_predict_endpoint_valid_payload(api_client: TestClient):
     assert "risk_score" in data
     assert "calibrated_score" in data
     assert "alert" in data
-    assert data["model_version"] == "v1.0.0-ModelF"
+    assert data["model_version"] == "model_f_r1"
     assert data["correlation_id"] == "test_correlation_123"
 
 
@@ -90,9 +86,10 @@ def test_metrics_endpoint(api_client: TestClient):
     assert "abuse_ring_detector_fallback_total" in text
 
 
-def test_kill_switch_admin_endpoint(api_client: TestClient):
+def test_kill_switch_admin_endpoint(api_client: TestClient, monkeypatch):
+    monkeypatch.setenv("ADMIN_KILL_SWITCH_TOKEN", "test-admin-token")
     # Activate kill switch
-    resp_ks_on = api_client.post("/v1/admin/kill-switch", json={"active": True})
+    resp_ks_on = api_client.post("/v1/admin/kill-switch", json={"active": True}, headers={"Authorization": "Bearer test-admin-token"})
     assert resp_ks_on.status_code == 200
     assert resp_ks_on.json()["kill_switch_active"] is True
 
@@ -111,7 +108,7 @@ def test_kill_switch_admin_endpoint(api_client: TestClient):
     assert "kill_switch_active" in data["reason_codes"]
 
     # Deactivate kill switch
-    resp_ks_off = api_client.post("/v1/admin/kill-switch", json={"active": False})
+    resp_ks_off = api_client.post("/v1/admin/kill-switch", json={"active": False}, headers={"Authorization": "Bearer test-admin-token"})
     assert resp_ks_off.status_code == 200
     assert resp_ks_off.json()["kill_switch_active"] is False
 

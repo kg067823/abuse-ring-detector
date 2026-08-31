@@ -38,6 +38,11 @@ class BaseFeatureStateStore(ABC):
         pass
 
     @abstractmethod
+    def claim_order_processed(self, order_id: str) -> bool:
+        """Atomically claim an order for one scoring worker."""
+        pass
+
+    @abstractmethod
     def mark_order_processed(self, order_id: str, response_payload: dict[str, Any] | None = None) -> None:
         """Mark an order_id as processed and store cached response for deduplication."""
         pass
@@ -88,6 +93,8 @@ class InMemoryFeatureStateStore(BaseFeatureStateStore):
                     t = t.tz_localize(None)
                 rec_copy["event_time"] = t
 
+            if any(r.get("order_id") == rec_copy.get("order_id") for r in self.records):
+                return
             self.records.append(rec_copy)
 
             cust_id = rec_copy["customer_id"]
@@ -112,6 +119,22 @@ class InMemoryFeatureStateStore(BaseFeatureStateStore):
     def is_order_processed(self, order_id: str) -> bool:
         with self._lock:
             return order_id in self.processed_orders
+
+    def claim_order_processed(self, order_id: str) -> bool:
+        with self._lock:
+            if order_id in self.processed_orders:
+                return False
+            self.processed_orders[order_id] = {"processing": True}
+            return True
+
+    def wait_for_cached_response(self, order_id: str, timeout: float = 5.0) -> dict[str, Any] | None:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            cached = self.get_cached_response(order_id)
+            if cached and "risk_score" in cached:
+                return cached
+            time.sleep(0.001)
+        return None
 
     def mark_order_processed(self, order_id: str, response_payload: dict[str, Any] | None = None) -> None:
         with self._lock:
@@ -218,7 +241,9 @@ class RedisFeatureStateStore(BaseFeatureStateStore):
                 "ip_id": str(record.get("ip_id", "")),
                 "address_id": str(record.get("address_id", "")),
                 "payment_id": str(record.get("payment_id", "")),
-                "merchant_category": str(record.get("merchant_category", "general"))
+                "merchant_category": str(record.get("merchant_category", "general")),
+                "currency": str(record.get("currency", "INR")),
+                "retry_count": float(record.get("retry_count", 0.0)),
             }
 
             p_json = json.dumps(payload)
@@ -241,7 +266,37 @@ class RedisFeatureStateStore(BaseFeatureStateStore):
             self.is_connected = False
 
     def get_events(self, customer_id: str | None = None) -> list[dict[str, Any]]:
+        if self.is_connected and self.redis_client is not None:
+            try:
+                keys = [f"{self.key_prefix}:cust:{customer_id}"] if customer_id else list(self.redis_client.scan_iter(f"{self.key_prefix}:cust:*"))
+                records = []
+                for key in keys:
+                    records.extend(json.loads(v) for v in self.redis_client.lrange(key, 0, -1))
+                return records
+            except Exception:
+                self.is_connected = False
+        if not self.is_connected:
+            return self.local_fallback.get_events(customer_id)
         return self.local_fallback.get_events(customer_id)
+
+    def claim_order_processed(self, order_id: str) -> bool:
+        if self.is_connected and self.redis_client is not None:
+            try:
+                key = f"{self.key_prefix}:dedup:{order_id}"
+                return bool(self.redis_client.set(key, json.dumps({"processing": True}), nx=True, ex=self.history_days * 86400))
+            except Exception:
+                self.is_connected = False
+                return False
+        return self.local_fallback.claim_order_processed(order_id)
+
+    def wait_for_cached_response(self, order_id: str, timeout: float = 5.0) -> dict[str, Any] | None:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            cached = self.get_cached_response(order_id)
+            if cached and "risk_score" in cached:
+                return cached
+            time.sleep(0.005)
+        return None
 
     def is_order_processed(self, order_id: str) -> bool:
         if self.is_connected and self.redis_client is not None:

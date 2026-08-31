@@ -4,18 +4,31 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from abuse_ring_detector.api import app, initialize_service
-from abuse_ring_detector.inference import TransactionPayload, load_model_artifact
+from abuse_ring_detector.api import app, set_service
+from abuse_ring_detector.inference import ProductionInferenceService, load_model_artifact
+from abuse_ring_detector.state import InMemoryFeatureStateStore
 from abuse_ring_detector.shadow_gates import ShadowSafetyGateEvaluator
 
 
 @pytest.fixture
 def setup_shadow_service(tmp_path):
     audit_file = tmp_path / "shadow_audit.jsonl"
-    model_path = Path("artifacts/model_f_bundle.pkl")
-    service = initialize_service(model_path=model_path, audit_log_path=audit_file)
+    model_path = Path("artifacts/model_f_r1_bundle.pkl")
+    model, _ = load_model_artifact(model_path, require_frozen_contract=True, manifest_path="model_f_r1_manifest.json", contract_path="inference_contract_r1.json")
+    service = ProductionInferenceService(model=model, feature_names=model.feature_columns, calibrator=model.calibrator, threshold=0.50, model_version="model_f_r1", schema_version="inference_contract_r1.v1", model_checksum="3f8bae638c6e81d0b391f9b226385e855ceb09744d774ea2d24cb9d0375c7cff", state_store=InMemoryFeatureStateStore(), audit_log_path=audit_file)
+    set_service(service)
     client = TestClient(app)
     return service, client, audit_file
+
+
+def test_kill_switch_requires_admin_auth(setup_shadow_service, monkeypatch):
+    monkeypatch.setenv("ADMIN_KILL_SWITCH_TOKEN", "test-admin-token")
+    _, client, _ = setup_shadow_service
+    denied = client.post("/v1/admin/kill-switch", json={"active": True})
+    assert denied.status_code == 401
+    accepted = client.post("/v1/admin/kill-switch", json={"active": True}, headers={"Authorization": "Bearer test-admin-token"})
+    assert accepted.status_code == 200
+    client.post("/v1/admin/kill-switch", json={"active": False}, headers={"Authorization": "Bearer test-admin-token"})
 
 
 def test_shadow_mode_non_enforcement_guarantee(setup_shadow_service):

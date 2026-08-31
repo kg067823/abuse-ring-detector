@@ -39,8 +39,8 @@ def shared_service(tmp_path_factory):
         model=model_f,
         feature_names=feature_names,
         threshold=0.50,
-        model_version="v1.0.0-ModelF",
-        schema_version="v1.0.0",
+        model_version="model_f_r1",
+        schema_version="inference_contract_r1.v1",
         audit_log_path=audit_log
     )
     return service, feature_names
