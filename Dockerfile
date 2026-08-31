@@ -34,6 +34,8 @@ RUN pip install --no-cache-dir /wheels/* && rm -rf /wheels
 COPY src/ /app/src/
 COPY configs/ /app/configs/
 COPY pyproject.toml /app/
+COPY model_f_r1_manifest.json /app/model_f_r1_manifest.json
+COPY inference_contract_r1.json /app/inference_contract_r1.json
 
 # Create logs & artifacts directories with non-root ownership
 RUN mkdir -p /app/logs /app/artifacts && \

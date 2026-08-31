@@ -21,7 +21,7 @@ logger = logging.getLogger("abuse_ring_detector.shadow_gates")
 class ShadowSafetyGateEvaluator:
     """Evaluates Phase 5 Shadow Data Quality and Safety Gates."""
 
-    EXPECTED_CHECKSUM = "82e77daac0762a04"
+    EXPECTED_CHECKSUM = None  # Load the approved R1 digest from its manifest.
     EXPECTED_FEATURE_COUNT = 137
     EXPECTED_THRESHOLD = 0.50
 

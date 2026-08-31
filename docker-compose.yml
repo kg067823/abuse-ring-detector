@@ -13,7 +13,9 @@ services:
       - PORT=8000
       - WORKERS=4
       - REDIS_URL=redis://redis:6379/0
-      - MODEL_PATH=/app/artifacts/model_f_bundle.pkl
+      - MODEL_PATH=/app/artifacts/model_f_r1_bundle.pkl
+      - MODEL_MANIFEST_PATH=/app/model_f_r1_manifest.json
+      - INFERENCE_CONTRACT_PATH=/app/inference_contract_r1.json
       - AUDIT_LOG_PATH=/app/logs/audit.jsonl
       - ENVIRONMENT=production
       - SHADOW_MODE=true

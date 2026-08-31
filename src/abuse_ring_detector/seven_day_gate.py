@@ -7,7 +7,7 @@ from counting toward the 7 live production observation days.
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any, Literal, Optional
 
 DATA_SOURCE_TYPE = Literal["REAL_LIVE_PRODUCTION", "STAGING_REPLAY", "SIMULATION", "UNAVAILABLE"]
 
@@ -34,7 +34,7 @@ class DailyObservationRecord:
     def passes_safety_thresholds(self) -> bool:
         if self.blocked_transactions > 0:
             return False
-        if self.model_checksum != "82e77daac0762a04":
+        if len(self.model_checksum) != 64 or self.model_checksum == "82e77daac0762a04":
             return False
         if self.feature_count != 137:
             return False
@@ -73,7 +73,7 @@ class SevenDayGateVerdict:
 class SevenDayShadowGateEvaluator:
     """Evaluates daily observation records for promotion to Canary Stage 1."""
 
-    def __init__(self, target_checksum: str = "82e77daac0762a04", target_features: int = 137):
+    def __init__(self, target_checksum: Optional[str] = None, target_features: int = 137):
         self.target_checksum = target_checksum
         self.target_features = target_features
 

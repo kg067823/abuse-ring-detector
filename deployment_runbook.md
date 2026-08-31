@@ -4,7 +4,7 @@
 - **Runtime Environment**: Python 3.11+ or Docker 24.0+ / Docker Compose v2.20+
 - **Inference Service**: FastAPI application (`src/abuse_ring_detector/api.py`)
 - **State Backend**: Redis v7.0+ (AOF persistence enabled, `volatile-lru` eviction policy)
-- **Model Artifact**: `artifacts/model_f_bundle.pkl` (Model F, 137 features, SHA-256 `82e77daac0762a04`)
+- **Model Artifact**: `artifacts/model_f_r1_bundle.pkl` (Model F-R1 reconstruction, 137 features, new SHA-256 recorded in `model_f_r1_manifest.json`)
 - **Operating System**: Linux (Ubuntu 22.04 LTS / Debian 12 / Container slim) or Windows 10/11
 
 ---
@@ -18,7 +18,7 @@
 | `WORKERS` | `4` | Uvicorn worker process count |
 | `ENVIRONMENT` | `production` | Deployment stage environment identifier |
 | `REDIS_URL` | `redis://localhost:6379/0` | Primary Redis feature state store connection string |
-| `MODEL_PATH` | `artifacts/model_f_bundle.pkl` | Path to frozen Model F model bundle |
+| `MODEL_PATH` | `artifacts/model_f_r1_bundle.pkl` | Path to reconstructed Model F-R1 bundle |
 | `AUDIT_LOG_PATH`| `logs/audit.jsonl` | Filepath for immutable JSON audit logging |
 | `LOCKED_THRESHOLD`| `0.50` | Non-negotiable frozen operating threshold $\tau = 0.50$ |
 | `FALLBACK_RISK_SCORE`| `0.05` | Population baseline risk score served during emergency fallbacks |
@@ -94,7 +94,7 @@ Verify that the loaded model matches the non-negotiable frozen Model F manifest:
 - **Model Architecture**: Graph-Temporal Subgraph HistGradientBoostingClassifier
 - **Feature Vector Dimension**: Exactly **137 features**
 - **Operating Threshold**: $\tau = 0.50$
-- **Model Artifact Checksum**: SHA-256 `82e77daac0762a04`
+- **Model Artifact Checksum**: Full SHA-256 from `model_f_r1_manifest.json`; the historical checksum is not accepted.
 
 ---
 

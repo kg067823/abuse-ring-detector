@@ -20,7 +20,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from .inference import (
-    FROZEN_THRESHOLD,
+    R1_MODEL_VERSION,
+    R1_THRESHOLD,
     InferenceResponse,
     ProductionInferenceService,
     TransactionPayload,
@@ -49,14 +50,21 @@ def initialize_service(
     """Initialize or load frozen Model F inference service."""
     global _inference_service
 
-    model_version = "v1.0.0-ModelF"
-    schema_version = "v1.0.0"
-    configured_path = model_path or os.getenv("MODEL_PATH") or "artifacts/model_f_bundle.pkl"
+    model_version = R1_MODEL_VERSION
+    schema_version = "inference_contract_r1.v1"
+    configured_path = model_path or os.getenv("MODEL_PATH") or "artifacts/model_f_r1_bundle.pkl"
     artifact_path = Path(configured_path)
+    manifest_path = Path(os.getenv("MODEL_MANIFEST_PATH", "model_f_r1_manifest.json"))
+    contract_path = Path(os.getenv("INFERENCE_CONTRACT_PATH", "inference_contract_r1.json"))
 
     # Production initialization is fail-closed: the frozen artifact must be
     # present and contract-compatible. Never train a replacement at startup.
-    model, checksum = load_model_artifact(artifact_path, require_frozen_contract=True)
+    model, checksum = load_model_artifact(
+        artifact_path,
+        require_frozen_contract=True,
+        manifest_path=manifest_path,
+        contract_path=contract_path,
+    )
     feature_names = list(getattr(model, "feature_columns", []))
     logger.info("Loaded verified frozen Model F artifact from %s (checksum=%s)", artifact_path, checksum)
 
@@ -77,7 +85,8 @@ def initialize_service(
     _inference_service = ProductionInferenceService(
         model=model,
         feature_names=feature_names,
-        threshold=FROZEN_THRESHOLD,
+        calibrator=getattr(model, "calibrator", None),
+        threshold=R1_THRESHOLD,
         model_version=model_version,
         schema_version=schema_version,
         state_store=state_store,

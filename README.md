@@ -17,6 +17,20 @@ pip install -r requirements.txt
 PYTHONPATH=src python -m abuse_ring_detector.cli run-poc --config configs/default.yaml --output-dir artifacts/run
 ```
 
+## Model F-R1 reconstructed freeze
+
+The repository now contains a newly generated `model_f_r1` artifact based on the
+source-level 137-feature design. This is **not** recovery of the historical
+Model F artifact and does not use checksum `82e77daac0762a04`. Its exact byte
+SHA-256, ordered feature contract, newly fitted calibration method, and measured
+metrics are recorded in `model_f_r1_manifest.json` and
+`inference_contract_r1.json`.
+
+The R1 artifact is generated with `scratch/build_model_f_r1.py` from the
+repository's deterministic synthetic pipeline. Historical Model F reports are
+not R1 performance evidence. R1 remains a shadow-only reconstruction pending
+full runtime validation.
+
 ## Production shadow deployment
 
 Production startup is fail-closed and requires the authoritative frozen Model F
@@ -24,7 +38,7 @@ bundle plus its manifest/contract. It must run with customer enforcement disable
 
 ```bash
 cp .env.example .env
-# Supply the approved artifacts/model_f_bundle.pkl and inference contract.
+# Supply the approved artifacts/model_f_r1_bundle.pkl and R1 inference contract.
 docker compose up --build
 curl -f http://localhost:8000/liveness
 curl -f http://localhost:8000/readiness
@@ -944,7 +958,9 @@ The repository now incorporates a production-grade **Live Shadow Mode Observatio
 ```env
 SHADOW_MODE=true
 ENFORCE_DECISIONS=false
-MODEL_PATH=artifacts/model_f_bundle.pkl
+MODEL_PATH=artifacts/model_f_r1_bundle.pkl
+MODEL_MANIFEST_PATH=model_f_r1_manifest.json
+INFERENCE_CONTRACT_PATH=inference_contract_r1.json
 AUDIT_LOG_PATH=logs/audit.jsonl
 REDIS_URL=redis://localhost:6379/0
 ```

@@ -8,6 +8,7 @@ data/raw/*
 data/processed/*
 artifacts/*
 reports/*
+!artifacts/model_f_r1_bundle.pkl
 !data/raw/.gitkeep
 !data/processed/.gitkeep
 !artifacts/.gitkeep

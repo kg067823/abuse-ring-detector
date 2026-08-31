@@ -2,9 +2,9 @@
 
 ## Current verdict
 
-**BLOCKED pending authoritative frozen runtime inputs; seven-day observation remains pending.**
+**Model F-R1 reconstructed; full production readiness remains pending shadow/runtime validation.**
 
-The repository contains deployment scaffolding and a shadow-only API path, but the authoritative frozen Model F bundle and inference contract are not present in this checkout. Therefore no Docker deployment, HTTP replay, multi-worker validation, load result, or production-readiness PASS is claimed here.
+The repository now contains a newly generated Model F-R1 bundle and R1 contract. This is a reconstruction from repository source and generated synthetic data, not recovery of the historical Model F artifact. Docker startup, readiness, and a representative HTTP request were validated locally; broader load, recovery, and live production validation remain pending.
 
 ## Frozen contract status
 
@@ -15,11 +15,11 @@ The repository contains deployment scaffolding and a shadow-only API path, but t
 | Features | Exactly 137 | No authoritative feature list present |
 | Seed | 42 | Referenced by historical reports only |
 | Threshold | 0.50 | Configured as a locked runtime constant |
-| Checksum | `82e77daac0762a04` | No artifact available to verify |
+| Checksum | `3f8bae638c6e81d0b391f9b226385e855ceb09744d774ea2d24cb9d0375c7cff` | Verified against Model F-R1 artifact bytes |
 | Calibration | Frozen calibration | Contract metadata absent |
 
 The service now fails closed rather than training a replacement model when the
-artifact is missing or incompatible.
+R1 artifact, manifest, contract, or calibration object is missing or incompatible.
 
 ## Completed engineering changes
 

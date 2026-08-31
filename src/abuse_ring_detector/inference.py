@@ -21,11 +21,12 @@ from .state import BaseFeatureStateStore, InMemoryFeatureStateStore, RedisFeatur
 logger = logging.getLogger("abuse_ring_detector.inference")
 
 
-FROZEN_MODEL_NAME = "graph_temporal_custrel_subgraph"
-FROZEN_FEATURE_COUNT = 137
-FROZEN_RANDOM_SEED = 42
-FROZEN_THRESHOLD = 0.50
-FROZEN_MODEL_CHECKSUM = "82e77daac0762a04"
+R1_MODEL_VERSION = "model_f_r1"
+R1_MODEL_IDENTITY = "graph_temporal_custrel_subgraph"
+R1_FEATURE_COUNT = 137
+R1_RANDOM_SEED = 42
+R1_THRESHOLD = 0.50
+HISTORICAL_MODEL_CHECKSUM = "82e77daac0762a04"
 
 
 class FrozenModelContractError(RuntimeError):
@@ -33,41 +34,34 @@ class FrozenModelContractError(RuntimeError):
 
 
 def compute_model_checksum(model_bundle: Any) -> str:
-    """Compute the contract checksum used by the frozen Model F manifest.
+    """Legacy in-memory checksum helper retained for POC callers."""
+    data = pickle.dumps(model_bundle)
+    return hashlib.sha256(data).hexdigest()
 
-    The frozen contract specifies the first 16 hexadecimal characters of the
-    SHA-256 digest.  Keep this representation stable; changing it would make
-    an otherwise identical frozen artifact appear to be a new model.
-    """
-    try:
-        data = pickle.dumps(model_bundle)
-        return hashlib.sha256(data).hexdigest()[:16]
-    except Exception:
-        return "sha256-modelf-fixed"
+
+def sha256_file(filepath: str | Path) -> str:
+    """Compute the full SHA-256 digest of an artifact's exact bytes."""
+    return hashlib.sha256(Path(filepath).read_bytes()).hexdigest()
 
 
 def validate_frozen_model_bundle(model_bundle: Any, checksum: str) -> None:
-    """Validate immutable Model F properties before serving any request."""
+    """Validate immutable Model F-R1 properties before serving."""
     feature_columns = list(getattr(model_bundle, "feature_columns", []))
-    if checksum != FROZEN_MODEL_CHECKSUM:
-        raise FrozenModelContractError(
-            f"model checksum mismatch: expected {FROZEN_MODEL_CHECKSUM}, got {checksum}"
-        )
-    if len(feature_columns) != FROZEN_FEATURE_COUNT:
-        raise FrozenModelContractError(
-            f"feature count mismatch: expected {FROZEN_FEATURE_COUNT}, got {len(feature_columns)}"
-        )
+    if checksum == HISTORICAL_MODEL_CHECKSUM:
+        raise FrozenModelContractError("historical Model F checksum is forbidden for R1")
     metadata = getattr(model_bundle, "metadata", {}) or {}
-    declared_name = metadata.get("model_name") or metadata.get("model")
-    if declared_name is not None and declared_name != FROZEN_MODEL_NAME:
-        raise FrozenModelContractError(
-            f"model identity mismatch: expected {FROZEN_MODEL_NAME}, got {declared_name}"
-        )
-    declared_seed = metadata.get("seed")
-    if declared_seed is not None and int(declared_seed) != FROZEN_RANDOM_SEED:
-        raise FrozenModelContractError(
-            f"random seed mismatch: expected {FROZEN_RANDOM_SEED}, got {declared_seed}"
-        )
+    if metadata.get("model_version") != R1_MODEL_VERSION:
+        raise FrozenModelContractError("model version is not Model F-R1")
+    if metadata.get("model_name") != R1_MODEL_IDENTITY:
+        raise FrozenModelContractError("model identity is not Model F-R1 design")
+    if len(feature_columns) != R1_FEATURE_COUNT or len(set(feature_columns)) != R1_FEATURE_COUNT:
+        raise FrozenModelContractError("R1 requires exactly 137 unique feature columns")
+    if int(metadata.get("seed", -1)) != R1_RANDOM_SEED:
+        raise FrozenModelContractError("R1 random seed mismatch")
+    if float(metadata.get("threshold", -1.0)) != R1_THRESHOLD:
+        raise FrozenModelContractError("R1 threshold mismatch")
+    if not hasattr(model_bundle, "calibrator"):
+        raise FrozenModelContractError("R1 calibration object is missing")
 
 
 def save_model_artifact(model_bundle: Any, filepath: str | Path) -> str:
@@ -93,6 +87,8 @@ def load_model_artifact(
     filepath: str | Path,
     *,
     require_frozen_contract: bool = False,
+    manifest_path: str | Path | None = None,
+    contract_path: str | Path | None = None,
 ) -> tuple[Any, str]:
     """Load a serialized model bundle, optionally enforcing Model F invariants.
 
@@ -103,15 +99,27 @@ def load_model_artifact(
     path = Path(filepath)
     if not path.exists():
         raise FileNotFoundError(f"Model artifact not found at {path}")
+    checksum = sha256_file(path)
+    if require_frozen_contract:
+        if not manifest_path or not contract_path:
+            raise FrozenModelContractError("R1 manifest and inference contract are required")
+        manifest = json.loads(Path(manifest_path).read_text())
+        contract = json.loads(Path(contract_path).read_text())
+        expected = manifest.get("artifact_sha256")
+        if expected != checksum or contract.get("artifact_sha256") != checksum:
+            raise FrozenModelContractError("R1 artifact checksum mismatch")
+        if len(checksum) != 64 or checksum == HISTORICAL_MODEL_CHECKSUM:
+            raise FrozenModelContractError("invalid R1 artifact checksum")
+        with open(path, "rb") as f:
+            model_bundle = pickle.load(f)
+        validate_frozen_model_bundle(model_bundle, checksum)
+        if manifest.get("feature_names") != list(getattr(model_bundle, "feature_columns", [])):
+            raise FrozenModelContractError("R1 feature ordering mismatch")
+        if contract.get("feature_names") != list(getattr(model_bundle, "feature_columns", [])):
+            raise FrozenModelContractError("R1 contract feature ordering mismatch")
+        return model_bundle, checksum
     with open(path, "rb") as f:
         model_bundle = pickle.load(f)
-
-    # The checksum is derived from the loaded bundle for backward-compatible
-    # sidecar handling. Production startup still requires an exact frozen
-    # contract match and never trusts an unverified sidecar value.
-    checksum = compute_model_checksum(model_bundle)
-    if require_frozen_contract:
-        validate_frozen_model_bundle(model_bundle, checksum)
     return model_bundle, checksum
 
 
@@ -315,10 +323,7 @@ class ProductionInferenceService:
             
             # 3. Probability calibration
             if self.calibrator is not None:
-                try:
-                    cal_score = float(self.calibrator.predict([raw_score])[0])
-                except Exception:
-                    cal_score = raw_score
+                cal_score = float(self.calibrator.predict([raw_score])[0])
             else:
                 cal_score = raw_score
                 
