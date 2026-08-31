@@ -17,6 +17,20 @@ pip install -r requirements.txt
 PYTHONPATH=src python -m abuse_ring_detector.cli run-poc --config configs/default.yaml --output-dir artifacts/run
 ```
 
+## Investigator Experience
+
+Model F-R1 shadow alerts can be organized into analyst-facing investigation
+cases through the case-management backend. The product layer exposes
+`/v1/alerts`, `/v1/cases`, `/v1/cases/{case_id}`, `/graph`, `/timeline`,
+`/evidence`, status transitions, and analyst notes. Cases use masked identifiers,
+deterministic observable shared-entity consolidation, transparent severity
+rules, append-only mutation history, and non-causal observed evidence.
+
+This backend is suitable for `DEMO / SYNTHETIC` replay and does not enable
+customer enforcement. It does not use synthetic `ring_id` or labels for case
+grouping, and it does not claim live production cases. The next product layer
+is the Investigator Frontend / AbuseRing Command Center.
+
 ## Model F-R1 reconstructed freeze
 
 The repository now contains a newly generated `model_f_r1` artifact based on the

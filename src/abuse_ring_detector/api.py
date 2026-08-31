@@ -19,6 +19,13 @@ from fastapi import FastAPI, Header, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from .case_management import (
+    CaseManager,
+    CaseStatus,
+    NoteCreate,
+    Severity,
+    StatusUpdate,
+)
 from .explain import explain_prediction, mask_identifier
 from .inference import (
     R1_MODEL_VERSION,
@@ -35,6 +42,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(na
 
 # Global Service Singleton
 _inference_service: ProductionInferenceService | None = None
+_case_manager = CaseManager()
 
 
 def set_service(service: ProductionInferenceService | None) -> None:
@@ -275,6 +283,8 @@ def predict_transaction(payload: TransactionApiPayload, request: Request, x_corr
     )
 
     resp = service.score_transaction(domain_payload, correlation_id=corr_id)
+    history = service.state_store.get_events()
+    _case_manager.ingest_prediction(domain_payload, resp, history)
     return resp
 
 
@@ -303,6 +313,70 @@ def explain_transaction(payload: TransactionApiPayload, request: Request, x_corr
         "correlation_id": corr_id,
     })
     return result
+
+
+@app.get("/v1/alerts")
+def list_alerts(min_risk: float | None = None):
+    return {"items": _case_manager.public_alerts(min_risk=min_risk), "demo_label": "DEMO / SYNTHETIC"}
+
+
+@app.get("/v1/cases")
+def list_cases(status_filter: CaseStatus | None = None, severity: Severity | None = None, min_risk: float | None = None):
+    return {"items": _case_manager.get_public_cases(status=status_filter, severity=severity, min_risk=min_risk), "demo_label": "DEMO / SYNTHETIC"}
+
+
+@app.get("/v1/cases/{case_id}")
+def get_case(case_id: str):
+    try:
+        return _case_manager.repository.public_case(case_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="case not found")
+
+
+@app.get("/v1/cases/{case_id}/graph")
+def case_graph(case_id: str):
+    try:
+        return _case_manager.graph(case_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="case not found")
+
+
+@app.get("/v1/cases/{case_id}/timeline")
+def case_timeline(case_id: str):
+    try:
+        return {"items": _case_manager.timeline(case_id)}
+    except KeyError:
+        raise HTTPException(status_code=404, detail="case not found")
+
+
+@app.get("/v1/cases/{case_id}/evidence")
+def case_evidence(case_id: str):
+    try:
+        return {"items": _case_manager.evidence(case_id)}
+    except KeyError:
+        raise HTTPException(status_code=404, detail="case not found")
+
+
+@app.patch("/v1/cases/{case_id}/status")
+def update_case_status(case_id: str, update: StatusUpdate, authorization: str | None = Header(None)):
+    require_admin_token(authorization)
+    try:
+        _case_manager.repository.transition(case_id, update)
+        return _case_manager.repository.public_case(case_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="case not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
+@app.post("/v1/cases/{case_id}/notes")
+def add_case_note(case_id: str, note: NoteCreate, authorization: str | None = Header(None)):
+    require_admin_token(authorization)
+    try:
+        _case_manager.repository.add_note(case_id, note)
+        return _case_manager.repository.public_case(case_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="case not found")
 
 
 @app.get("/metrics", status_code=status.HTTP_200_OK)
