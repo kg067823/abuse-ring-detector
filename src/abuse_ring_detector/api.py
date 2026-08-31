@@ -19,19 +19,14 @@ from fastapi import FastAPI, Header, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from .config import load_config
-from .features import build_subgraph_extended_features
 from .inference import (
+    FROZEN_THRESHOLD,
     InferenceResponse,
     ProductionInferenceService,
     TransactionPayload,
-    compute_model_checksum,
     load_model_artifact,
 )
-from .models import fit_model
-from .splits import split_by_time
 from .state import InMemoryFeatureStateStore, RedisFeatureStateStore
-from .synthetic import generate_ecosystem
 
 logger = logging.getLogger("abuse_ring_detector.api")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -54,40 +49,16 @@ def initialize_service(
     """Initialize or load frozen Model F inference service."""
     global _inference_service
 
-    model = None
-    feature_names = []
     model_version = "v1.0.0-ModelF"
     schema_version = "v1.0.0"
+    configured_path = model_path or os.getenv("MODEL_PATH") or "artifacts/model_f_bundle.pkl"
+    artifact_path = Path(configured_path)
 
-    # Attempt to load model from disk if provided or default path exists
-    candidate_paths = [
-        model_path,
-        Path("artifacts/model_f_bundle.pkl"),
-        Path("artifacts/full-run/model_f_bundle.pkl")
-    ]
-    
-    for p in candidate_paths:
-        if p and Path(p).exists():
-            try:
-                bundle, checksum = load_model_artifact(p)
-                model = bundle
-                feature_names = getattr(bundle, "feature_columns", [])
-                logger.info(f"Loaded frozen Model F artifact from {p} (checksum={checksum})")
-                break
-            except Exception as e:
-                logger.warning(f"Failed to load model artifact from {p}: {e}")
-
-    # Fallback to generating baseline synthetic model if no artifact file is on disk
-    if model is None:
-        logger.info("Initializing baseline Model F champion model from default config...")
-        config = load_config("configs/default.yaml")
-        dataset = generate_ecosystem(config)
-        split = split_by_time(dataset.orders, config.split["train"], config.split["validation"])
-        fs_all = build_subgraph_extended_features(dataset.orders, dataset.labels, config.graph["history_days"])
-        feature_names = fs_all.X.columns.tolist()
-        train_ids = pd.Index(split.train["order_id"]) if hasattr(split.train, "order_id") else split.train.index
-        model = fit_model(fs_all.X.loc[train_ids], fs_all.y.loc[train_ids], config.model["backend"], config.seed)
-        model.feature_columns = feature_names
+    # Production initialization is fail-closed: the frozen artifact must be
+    # present and contract-compatible. Never train a replacement at startup.
+    model, checksum = load_model_artifact(artifact_path, require_frozen_contract=True)
+    feature_names = list(getattr(model, "feature_columns", []))
+    logger.info("Loaded verified frozen Model F artifact from %s (checksum=%s)", artifact_path, checksum)
 
     # Determine state backend
     redis_uri = redis_url or os.getenv("REDIS_URL")
@@ -96,22 +67,29 @@ def initialize_service(
         if state_store.is_healthy():
             logger.info("Connected to Redis persistent feature state backend")
         else:
-            logger.warning("Redis backend unavailable; falling back to thread-safe local in-memory store")
-            state_store = InMemoryFeatureStateStore()
+            raise RuntimeError("configured Redis state backend is unavailable")
     else:
-        state_store = InMemoryFeatureStateStore()
+        # A production deployment must declare a shared state backend. The
+        # in-memory store remains available only to direct unit-test injection.
+        raise RuntimeError("REDIS_URL is required for production initialization")
 
     checksum = locals().get("checksum", None)
     _inference_service = ProductionInferenceService(
         model=model,
         feature_names=feature_names,
-        threshold=0.50,
+        threshold=FROZEN_THRESHOLD,
         model_version=model_version,
         schema_version=schema_version,
         state_store=state_store,
         audit_log_path=audit_log_path,
         model_checksum=checksum
     )
+
+    # This milestone is shadow-only. Refuse unsafe production configuration.
+    shadow_mode = os.getenv("SHADOW_MODE", "true").lower() in ("true", "1", "yes")
+    enforce_decisions = os.getenv("ENFORCE_DECISIONS", "false").lower() in ("true", "1", "yes")
+    if not shadow_mode or enforce_decisions:
+        raise RuntimeError("unsafe decision configuration: require SHADOW_MODE=true and ENFORCE_DECISIONS=false")
 
     # Check for initial kill switch env flag
     if os.getenv("KILL_SWITCH", "").lower() in ("true", "1", "yes"):
@@ -132,7 +110,11 @@ def get_service() -> ProductionInferenceService:
 async def lifespan(app: FastAPI):
     """Lifecycle manager for graceful startup and shutdown."""
     logger.info("Starting AbuseRing Detector Inference Service...")
-    initialize_service()
+    # Tests and embedding applications may inject a verified service before
+    # creating the client. Production startup still initializes strictly from
+    # the configured frozen artifact.
+    if _inference_service is None:
+        initialize_service()
     yield
     logger.info("Shutting down AbuseRing Detector Inference Service...")
     # Flush or close state backend connections if needed
@@ -220,18 +202,30 @@ def health_check():
 
 @app.get("/readiness", status_code=status.HTTP_200_OK)
 def readiness_check():
-    """Readiness probe checking model loading and state store health."""
-    service = get_service()
+    """Readiness probe checking verified model and state store health."""
+    try:
+        service = get_service()
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="frozen model is not verified",
+        )
     if service.model is None:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Model artifact not loaded")
-    
+
     backend_healthy = service.state_store.is_healthy()
+    if not backend_healthy:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="state backend unavailable")
     return {
         "status": "ready",
         "model_loaded": True,
         "feature_count": len(service.feature_names),
+        "threshold": service.threshold,
+        "model_checksum": service.model_checksum,
         "state_backend": "redis" if isinstance(service.state_store, RedisFeatureStateStore) else "in_memory",
-        "state_backend_healthy": backend_healthy
+        "state_backend_healthy": backend_healthy,
+        "shadow_mode": True,
+        "enforce_decisions": False,
     }
 
 
@@ -272,19 +266,34 @@ def get_metrics():
     lines = [
         "# HELP abuse_ring_detector_requests_total Total number of inference requests scored.",
         "# TYPE abuse_ring_detector_requests_total counter",
-        f"abuse_ring_detector_requests_total {m.get('total_requests', 0)}",
+        f"abuse_ring_detector_requests_total {m.get('total_processed_count', 0)}",
         "# HELP abuse_ring_detector_fallback_total Total number of fallback responses served.",
         "# TYPE abuse_ring_detector_fallback_total counter",
-        f"abuse_ring_detector_fallback_total {m.get('total_fallbacks', 0)}",
+        f"abuse_ring_detector_fallback_total {m.get('fallback_count', 0)}",
         "# HELP abuse_ring_detector_alerts_total Total number of high risk alerts triggered.",
         "# TYPE abuse_ring_detector_alerts_total counter",
-        f"abuse_ring_detector_alerts_total {m.get('total_alerts', 0)}",
+        f"abuse_ring_detector_alerts_total {m.get('alert_count', 0)}",
+        "# HELP abuse_ring_detector_shadow_alerts_total High-risk shadow decisions.",
+        "# TYPE abuse_ring_detector_shadow_alerts_total counter",
+        f"abuse_ring_detector_shadow_alerts_total {m.get('alert_count', 0)}",
+        "# HELP abuse_ring_detector_blocked_transactions_total Customer transactions blocked (must remain zero in shadow mode).",
+        "# TYPE abuse_ring_detector_blocked_transactions_total counter",
+        f"abuse_ring_detector_blocked_transactions_total {m.get('blocked_transactions', 0)}",
+        "# HELP abuse_ring_detector_modified_transactions_total Customer transactions modified (must remain zero in shadow mode).",
+        "# TYPE abuse_ring_detector_modified_transactions_total counter",
+        f"abuse_ring_detector_modified_transactions_total {m.get('modified_transactions', 0)}",
+        "# HELP abuse_ring_detector_shadow_mode Shadow mode enabled (1/0).",
+        "# TYPE abuse_ring_detector_shadow_mode gauge",
+        "abuse_ring_detector_shadow_mode 1",
+        "# HELP abuse_ring_detector_enforcement_enabled Customer enforcement enabled (1/0).",
+        "# TYPE abuse_ring_detector_enforcement_enabled gauge",
+        "abuse_ring_detector_enforcement_enabled 0",
         "# HELP abuse_ring_detector_latency_seconds_bucket Latency histogram in seconds.",
         "# TYPE abuse_ring_detector_latency_seconds_bucket histogram",
-        f"abuse_ring_detector_latency_seconds_bucket{{le=\"0.05\"}} {m.get('latency_p50_ms', 0)/1000.0}",
-        f"abuse_ring_detector_latency_seconds_bucket{{le=\"0.10\"}} {m.get('latency_p95_ms', 0)/1000.0}",
-        f"abuse_ring_detector_latency_seconds_bucket{{le=\"0.20\"}} {m.get('latency_p99_ms', 0)/1000.0}",
-        f"abuse_ring_detector_latency_seconds_bucket{{le=\"+Inf\"}} {m.get('total_requests', 0)}"
+        f"abuse_ring_detector_latency_seconds_bucket{{le=\"0.05\"}} {m.get('latencies_ms', {}).get('p50', 0)/1000.0}",
+        f"abuse_ring_detector_latency_seconds_bucket{{le=\"0.10\"}} {m.get('latencies_ms', {}).get('p95', 0)/1000.0}",
+        f"abuse_ring_detector_latency_seconds_bucket{{le=\"0.20\"}} {m.get('latencies_ms', {}).get('p99', 0)/1000.0}",
+        f"abuse_ring_detector_latency_seconds_bucket{{le=\"+Inf\"}} {m.get('total_processed_count', 0)}"
     ]
     return Response(content="\n".join(lines) + "\n", media_type="text/plain")
 

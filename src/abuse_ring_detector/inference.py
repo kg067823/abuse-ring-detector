@@ -21,13 +21,53 @@ from .state import BaseFeatureStateStore, InMemoryFeatureStateStore, RedisFeatur
 logger = logging.getLogger("abuse_ring_detector.inference")
 
 
+FROZEN_MODEL_NAME = "graph_temporal_custrel_subgraph"
+FROZEN_FEATURE_COUNT = 137
+FROZEN_RANDOM_SEED = 42
+FROZEN_THRESHOLD = 0.50
+FROZEN_MODEL_CHECKSUM = "82e77daac0762a04"
+
+
+class FrozenModelContractError(RuntimeError):
+    """Raised when the deployed artifact cannot satisfy the frozen contract."""
+
+
 def compute_model_checksum(model_bundle: Any) -> str:
-    """Computes deterministic SHA-256 checksum of model artifact / parameters."""
+    """Compute the contract checksum used by the frozen Model F manifest.
+
+    The frozen contract specifies the first 16 hexadecimal characters of the
+    SHA-256 digest.  Keep this representation stable; changing it would make
+    an otherwise identical frozen artifact appear to be a new model.
+    """
     try:
         data = pickle.dumps(model_bundle)
         return hashlib.sha256(data).hexdigest()[:16]
     except Exception:
         return "sha256-modelf-fixed"
+
+
+def validate_frozen_model_bundle(model_bundle: Any, checksum: str) -> None:
+    """Validate immutable Model F properties before serving any request."""
+    feature_columns = list(getattr(model_bundle, "feature_columns", []))
+    if checksum != FROZEN_MODEL_CHECKSUM:
+        raise FrozenModelContractError(
+            f"model checksum mismatch: expected {FROZEN_MODEL_CHECKSUM}, got {checksum}"
+        )
+    if len(feature_columns) != FROZEN_FEATURE_COUNT:
+        raise FrozenModelContractError(
+            f"feature count mismatch: expected {FROZEN_FEATURE_COUNT}, got {len(feature_columns)}"
+        )
+    metadata = getattr(model_bundle, "metadata", {}) or {}
+    declared_name = metadata.get("model_name") or metadata.get("model")
+    if declared_name is not None and declared_name != FROZEN_MODEL_NAME:
+        raise FrozenModelContractError(
+            f"model identity mismatch: expected {FROZEN_MODEL_NAME}, got {declared_name}"
+        )
+    declared_seed = metadata.get("seed")
+    if declared_seed is not None and int(declared_seed) != FROZEN_RANDOM_SEED:
+        raise FrozenModelContractError(
+            f"random seed mismatch: expected {FROZEN_RANDOM_SEED}, got {declared_seed}"
+        )
 
 
 def save_model_artifact(model_bundle: Any, filepath: str | Path) -> str:
@@ -49,24 +89,29 @@ def save_model_artifact(model_bundle: Any, filepath: str | Path) -> str:
     return checksum
 
 
-def load_model_artifact(filepath: str | Path) -> tuple[Any, str]:
-    """Loads Model F bundle artifact from disk and verifies checksum."""
+def load_model_artifact(
+    filepath: str | Path,
+    *,
+    require_frozen_contract: bool = False,
+) -> tuple[Any, str]:
+    """Load a serialized model bundle, optionally enforcing Model F invariants.
+
+    Historical POC tooling may load arbitrary bundles for analysis. The
+    production API must pass ``require_frozen_contract=True`` so a missing or
+    incompatible artifact cannot be replaced by a newly trained model.
+    """
     path = Path(filepath)
     if not path.exists():
         raise FileNotFoundError(f"Model artifact not found at {path}")
-    meta_path = path.with_suffix(".json")
-    checksum = None
-    if meta_path.exists():
-        try:
-            with open(meta_path, "r") as f:
-                meta = json.load(f)
-                checksum = meta.get("checksum")
-        except Exception:
-            pass
     with open(path, "rb") as f:
         model_bundle = pickle.load(f)
-    if not checksum:
-        checksum = compute_model_checksum(model_bundle)
+
+    # The checksum is derived from the loaded bundle for backward-compatible
+    # sidecar handling. Production startup still requires an exact frozen
+    # contract match and never trusts an unverified sidecar value.
+    checksum = compute_model_checksum(model_bundle)
+    if require_frozen_contract:
+        validate_frozen_model_bundle(model_bundle, checksum)
     return model_bundle, checksum
 
 
@@ -131,6 +176,8 @@ class InferenceResponse:
     reason_codes: list[str] = field(default_factory=list)
     timestamp: str = ""
     correlation_id: str = ""
+    shadow_mode: bool = True
+    enforcement_applied: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -300,7 +347,9 @@ class ProductionInferenceService:
                 fallback_applied=False,
                 reason_codes=[],
                 timestamp=time.strftime("%Y-%m-%dT%H:%M:%SZ"),
-                correlation_id=correlation_id
+                correlation_id=correlation_id,
+                shadow_mode=True,
+                enforcement_applied=False,
             )
             
             # Mark processed for deduplication
@@ -330,7 +379,9 @@ class ProductionInferenceService:
             fallback_applied=True,
             reason_codes=reasons,
             timestamp=time.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            correlation_id=correlation_id
+            correlation_id=correlation_id,
+            shadow_mode=True,
+            enforcement_applied=False,
         )
 
     def _write_audit_log(self, resp: InferenceResponse) -> None:
@@ -361,6 +412,10 @@ class ProductionInferenceService:
             "alert_count": self.alert_count,
             "alert_rate": (self.alert_count / self.total_processed_count) if self.total_processed_count > 0 else 0.0,
             "kill_switch_active": self.kill_switch_active,
+            "shadow_mode": True,
+            "enforce_decisions": False,
+            "blocked_transactions": 0,
+            "modified_transactions": 0,
             "model_version": self.model_version,
             "schema_version": self.schema_version,
             "model_checksum": self.model_checksum,

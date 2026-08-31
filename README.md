@@ -8,12 +8,39 @@ Individual accounts can look legitimate while coordinated relationships reveal s
 
 ## Quickstart
 
+The historical synthetic POC can be run with:
+
 ```bash
 python3.11 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 PYTHONPATH=src python -m abuse_ring_detector.cli run-poc --config configs/default.yaml --output-dir artifacts/run
 ```
+
+## Production shadow deployment
+
+Production startup is fail-closed and requires the authoritative frozen Model F
+bundle plus its manifest/contract. It must run with customer enforcement disabled:
+
+```bash
+cp .env.example .env
+# Supply the approved artifacts/model_f_bundle.pkl and inference contract.
+docker compose up --build
+curl -f http://localhost:8000/liveness
+curl -f http://localhost:8000/readiness
+```
+
+Required safety configuration:
+
+```text
+SHADOW_MODE=true
+ENFORCE_DECISIONS=false
+```
+
+A missing or mismatched frozen artifact is a deployment blocker; the service will
+not train a replacement model. Run `python seven_day_gate.py` to display the
+operational status. It intentionally remains `NOT STARTED`, `0/7`, and `BLOCKED`
+until genuine production shadow evidence is supplied.
 
 For a fast smoke run, create a YAML config with a few hundred customers/orders and ring count 100. Generated CSV/GZIP tables, manifest, threshold tables, and Markdown report appear in the run directory.
 

@@ -16,6 +16,9 @@ services:
       - MODEL_PATH=/app/artifacts/model_f_bundle.pkl
       - AUDIT_LOG_PATH=/app/logs/audit.jsonl
       - ENVIRONMENT=production
+      - SHADOW_MODE=true
+      - ENFORCE_DECISIONS=false
+      - KILL_SWITCH=false
     depends_on:
       redis:
         condition: service_healthy

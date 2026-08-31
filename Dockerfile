@@ -9,8 +9,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy project specification files
+# Copy project specification and package sources for the wheel build
 COPY pyproject.toml .
+COPY src/ /app/src/
 
 # Install dependencies using pip into local wheel directory
 RUN pip install --no-cache-dir --upgrade pip wheel setuptools
@@ -43,7 +44,9 @@ ENV PYTHONPATH="/app/src" \
     PYTHONUNBUFFERED=1 \
     PORT=8000 \
     HOST=0.0.0.0 \
-    WORKERS=4
+    WORKERS=4 \
+    SHADOW_MODE=true \
+    ENFORCE_DECISIONS=false
 
 USER appuser
 
