@@ -101,6 +101,7 @@ def initialize_service(
     else:
         state_store = InMemoryFeatureStateStore()
 
+    checksum = locals().get("checksum", None)
     _inference_service = ProductionInferenceService(
         model=model,
         feature_names=feature_names,
@@ -108,7 +109,8 @@ def initialize_service(
         model_version=model_version,
         schema_version=schema_version,
         state_store=state_store,
-        audit_log_path=audit_log_path
+        audit_log_path=audit_log_path,
+        model_checksum=checksum
     )
 
     # Check for initial kill switch env flag

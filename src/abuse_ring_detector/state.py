@@ -81,10 +81,12 @@ class InMemoryFeatureStateStore(BaseFeatureStateStore):
 
     def add_event(self, record: dict[str, Any]) -> None:
         with self._lock:
-            order_id = record["order_id"]
             rec_copy = dict(record)
-            if isinstance(rec_copy.get("event_time"), str):
-                rec_copy["event_time"] = pd.to_datetime(rec_copy["event_time"])
+            if rec_copy.get("event_time") is not None:
+                t = pd.to_datetime(rec_copy["event_time"])
+                if hasattr(t, "tz_localize") and getattr(t, "tzinfo", None) is not None:
+                    t = t.tz_localize(None)
+                rec_copy["event_time"] = t
 
             self.records.append(rec_copy)
 

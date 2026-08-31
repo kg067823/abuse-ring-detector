@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ShadowGroundTruthJoinSchema",
+  "description": "Schema for joining shadow prediction audit logs with delayed ground-truth outcome labels.",
+  "type": "object",
+  "properties": {
+    "order_id": { "type": "string" },
+    "customer_id": { "type": "string" },
+    "prediction_timestamp": { "type": "string", "format": "date-time" },
+    "ground_truth_label_timestamp": { "type": "string", "format": "date-time" },
+    "model_version": { "type": "string" },
+    "model_checksum": { "type": "string" },
+    "risk_score": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+    "operating_threshold_tau": { "type": "number" },
+    "shadow_decision": { "type": "string" },
+    "actual_is_abuse": { "type": "boolean" },
+    "actual_ring_id": { "type": ["string", "null"] },
+    "dispute_reason_code": { "type": ["string", "null"] },
+    "financial_loss_amount": { "type": "number", "minimum": 0.0 }
+  },
+  "required": [
+    "order_id",
+    "customer_id",
+    "prediction_timestamp",
+    "model_version",
+    "model_checksum",
+    "risk_score",
+    "shadow_decision",
+    "actual_is_abuse"
+  ]
+}

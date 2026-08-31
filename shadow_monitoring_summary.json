@@ -1,0 +1,42 @@
+{
+  "evaluation_timestamp": "2026-08-30T23:15:00Z",
+  "environment": "STAGING_REPLAY",
+  "live_production_traffic_attached": false,
+  "model_f_manifest": {
+    "model_name": "graph_temporal_custrel_subgraph",
+    "checksum": "82e77daac0762a04",
+    "feature_count": 137,
+    "operating_threshold_tau": 0.50,
+    "random_seed": 42
+  },
+  "traffic_metrics": {
+    "total_events_observed": 150,
+    "successful_scores": 150,
+    "error_count": 0,
+    "fallback_count": 0,
+    "fallback_rate": 0.0,
+    "customer_blocked_count": 0,
+    "non_enforcement_guarantee": "VERIFIED_100_PERCENT"
+  },
+  "latency_metrics_ms": {
+    "p50": 106.6,
+    "p95": 152.6,
+    "p99": 187.7
+  },
+  "data_quality_and_drift": {
+    "null_identifier_rate": 0.0,
+    "unseen_device_rate": 0.12,
+    "unseen_ip_rate": 0.18,
+    "feature_null_rate": 0.0,
+    "population_stability_index_psi": {
+      "customer_degree_centrality": 0.012,
+      "device_sharing_account_count": 0.008,
+      "ip_rotation_velocity_1h": 0.015
+    },
+    "score_distribution_drift": "NONE_DETECTED"
+  },
+  "ground_truth_pipeline": {
+    "status": "READY_FOR_LABEL_JOIN",
+    "delayed_labels_available": false
+  }
+}

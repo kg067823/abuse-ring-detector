@@ -909,6 +909,35 @@ Production releases are controlled by `production_release_validation_report.md` 
 
 ---
 
+# Live Shadow Mode Observation System & Quality Gates
+
+The repository now incorporates a production-grade **Live Shadow Mode Observation & Quality Gate System** (`shadow_mode_validation_report.md` and `live_shadow_observation_report.md`).
+
+## Mandatory Shadow Safety Configuration
+```env
+SHADOW_MODE=true
+ENFORCE_DECISIONS=false
+MODEL_PATH=artifacts/model_f_bundle.pkl
+AUDIT_LOG_PATH=logs/audit.jsonl
+REDIS_URL=redis://localhost:6379/0
+```
+
+## Key Capabilities & Safety Guarantees
+1. **Zero Customer Traffic Blocking**: In shadow mode, risk predictions are recorded strictly to audit streams (`logs/audit.jsonl`). API responses return `action: "SHADOW_LOG_ONLY"` or `action: "ALLOW"`. Zero transactions are blocked or delayed.
+2. **Phase 5 Safety Gate Evaluator**: Automated gate evaluator ([`src/abuse_ring_detector/shadow_gates.py`](file:///C:/Users/kg067/OneDrive/Desktop/Hackathon/abuse-ring-detector/src/abuse_ring_detector/shadow_gates.py)) checks model checksum (`82e77daac0762a04`), 137 features, PII masking compliance, error/fallback rates, and latency SLA.
+3. **Delayed Ground-Truth Evaluation Pipeline**: Evaluator ([`src/abuse_ring_detector/shadow_evaluator.py`](file:///C:/Users/kg067/OneDrive/Desktop/Hackathon/abuse-ring-detector/src/abuse_ring_detector/shadow_evaluator.py)) joins predictions with ground-truth dispute/chargeback labels to measure PR-AUC, ROC-AUC, Precision, Recall, FPR, FNR, Exposure Captured vs. Missed, and Ring Recall.
+4. **Master Validation Runner**: Execute `scratch/run_shadow_observation_validation.py` to programmatically evaluate all shadow safety gates and observation metrics.
+
+## Artifacts & Schemas
+- `live_shadow_observation_report.md`: Master live shadow observation validation report.
+- `shadow_daily_metrics.jsonl`: Durable daily metric logs.
+- `shadow_monitoring_summary.json`: Monitoring summary containing PSI, null rates, and score distributions.
+- `shadow_gate_results.json`: Phase 5 & Phase 9 safety gate results.
+- `shadow_incidents.md`: Incident log and drill history.
+- `shadow_ground_truth_schema.json`: JSON schema for joining predictions with delayed ground-truth labels.
+
+---
+
 # Final Production Release Gate Verdict
 
 ### Verdict: **CONDITIONAL GO — PRODUCTION INFRASTRUCTURE READY, LIVE SHADOW VALIDATION REQUIRED**
@@ -916,6 +945,7 @@ Production releases are controlled by `production_release_validation_report.md` 
 All production deployment infrastructure, preflight safety gates, shadow mode routing, canary progression roadmaps, fallback mechanisms, emergency kill-switch controls, observability probes, and operational SOP runbooks are **100% empirically validated**.
 
 **Recommended Single Next Engineering Step**: Deploy the containerized service ([`docker-compose.yml`](file:///C:/Users/kg067/OneDrive/Desktop/Hackathon/abuse-ring-detector/docker-compose.yml)) in **Shadow Mode** (`SHADOW_MODE=true`, `ENFORCE_DECISIONS=false`) and monitor live shadow scoring against production audit logs (`logs/audit.jsonl`) for 7 days before initiating Canary Stage 1 (5% enforcement).
+
 
 
 

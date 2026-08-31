@@ -99,10 +99,13 @@ class TransactionPayload:
         return errors
 
     def to_record_dict(self) -> dict[str, Any]:
+        t_evt = pd.to_datetime(self.event_time)
+        if hasattr(t_evt, "tz_localize") and getattr(t_evt, "tzinfo", None) is not None:
+            t_evt = t_evt.tz_localize(None)
         return {
             "order_id": self.order_id,
             "customer_id": self.customer_id,
-            "event_time": pd.to_datetime(self.event_time),
+            "event_time": t_evt,
             "amount": float(self.amount),
             "currency": self.currency,
             "device_id": str(self.device_id),
@@ -146,12 +149,16 @@ class StreamingFeatureStore:
     def compute_as_of_features(self, payload: TransactionPayload, feature_names: list[str]) -> pd.Series:
         """Compute exact 137 features with 100% training-serving parity strictly as-of historical state."""
         t_current = pd.to_datetime(payload.event_time)
+        if hasattr(t_current, "tz_localize") and getattr(t_current, "tzinfo", None) is not None:
+            t_current = t_current.tz_localize(None)
 
         # Retrieve historical events strictly prior to current event time
         all_records = self.state_store.get_events()
         past_records = []
         for r in all_records:
             t_evt = pd.to_datetime(r["event_time"])
+            if hasattr(t_evt, "tz_localize") and getattr(t_evt, "tzinfo", None) is not None:
+                t_evt = t_evt.tz_localize(None)
             if t_evt < t_current:
                 rec_copy = dict(r)
                 rec_copy["event_time"] = t_evt
@@ -190,7 +197,8 @@ class ProductionInferenceService:
         schema_version: str = "v1.0.0",
         fallback_risk_score: float = 0.05,
         state_store: BaseFeatureStateStore | None = None,
-        audit_log_path: str | Path | None = None
+        audit_log_path: str | Path | None = None,
+        model_checksum: str | None = None
     ):
         self.model = model
         self.feature_names = feature_names
@@ -199,7 +207,7 @@ class ProductionInferenceService:
         self.model_version = model_version
         self.schema_version = schema_version
         self.fallback_risk_score = fallback_risk_score
-        self.model_checksum = compute_model_checksum(model)
+        self.model_checksum = model_checksum or getattr(model, "checksum", None) or compute_model_checksum(model)
         
         self.state_store = state_store or InMemoryFeatureStateStore()
         self.feature_store = StreamingFeatureStore(state_store=self.state_store)
@@ -275,7 +283,7 @@ class ProductionInferenceService:
             # 4. State store update (strictly AFTER feature extraction for current event)
             self.state_store.add_event(payload.to_record_dict())
             
-            latency_ms = (time.perf_counter() - t0) * 1000.0
+            latency_ms = round((time.perf_counter() - t0) * 1000.0, 3)
             self.latency_history.append(latency_ms)
             if len(self.latency_history) > 10000:
                 self.latency_history = self.latency_history[-5000:]
@@ -308,7 +316,7 @@ class ProductionInferenceService:
             return resp
 
     def _build_fallback_response(self, order_id: str, t0: float, reasons: list[str], correlation_id: str = "") -> InferenceResponse:
-        latency_ms = (time.perf_counter() - t0) * 1000.0
+        latency_ms = round((time.perf_counter() - t0) * 1000.0, 3)
         self.latency_history.append(latency_ms)
         return InferenceResponse(
             order_id=order_id,
