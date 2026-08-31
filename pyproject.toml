@@ -16,10 +16,12 @@ dependencies = [
   "scikit-learn==1.6.1",
   "networkx==3.4.2",
   "PyYAML==6.0.2",
+  "requests==2.32.5",
 ]
 
 [project.optional-dependencies]
 test = ["pytest==8.4.2", "httpx==0.28.1"]
+frontend = ["streamlit==1.48.1", "plotly==6.3.0"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

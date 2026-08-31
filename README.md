@@ -17,6 +17,30 @@ pip install -r requirements.txt
 PYTHONPATH=src python -m abuse_ring_detector.cli run-poc --config configs/default.yaml --output-dir artifacts/run
 ```
 
+## AbuseRing Command Center
+
+Run the API and Redis stack with an explicit local admin token:
+
+```bash
+ADMIN_KILL_SWITCH_TOKEN=demo-secret docker compose up --build
+```
+
+Install and launch the API-backed investigator console:
+
+```bash
+uv pip install --python .venv/bin/python -e '.[frontend]'
+ABUSERING_API_URL=http://localhost:8000 \
+ABUSERING_ADMIN_TOKEN=demo-secret \
+.venv/bin/streamlit run app/command_center.py
+```
+
+The Command Center provides Overview, Alert Queue, Investigation Cases, Case
+Workspace, Network Explorer, System Health, and Demo Mode views. It consumes
+real R1 investigator endpoints and displays only masked identifiers. All demo
+records are labeled `DEMO DATA / SYNTHETIC`; the interface never enables
+customer enforcement. See `abusering_command_center_report.md` for the
+architecture and limitations.
+
 ## Investigator Experience
 
 Model F-R1 shadow alerts can be organized into analyst-facing investigation
