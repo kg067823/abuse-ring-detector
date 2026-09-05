@@ -4,9 +4,10 @@
 
 **Fraud systems inspect transactions. AbuseRing investigates networks.**
 
-Primary scenario: **Mixed multi-entity**. The demo uses the real R1 API and
-backend case pipeline. Results are model-dependent; never promise a specific
-alert count or case if the API does not return one.
+The UI is a single monitoring screen: transactions flow in, AbuseRing scores
+every one automatically, and connected risk becomes one investigation case.
+There is no pattern selection and no manual refresh — the presenter only starts
+the traffic.
 
 ## Setup
 
@@ -21,70 +22,70 @@ $env:ADMIN_KILL_SWITCH_TOKEN="demo-secret"
 .venv\Scripts\python.exe scripts\start_demo.py --docker
 ```
 
-Open `http://localhost:8501`. Confirm the banner says `DEMO DATA / SYNTHETIC`,
-`Model F-R1`, `SHADOW MODE`, and `ENFORCEMENT OFF`.
+Open `http://localhost:8501`. Confirm the header shows `DEMO / SYNTHETIC`,
+`SHADOW MODE`, `ENFORCEMENT OFF` and `○ STREAM IDLE` with an empty feed.
 
 ## 0:00–0:20 — Problem
 
-Open **Overview**.
+On the quiet Live Monitor, say: “Individual transactions can look ordinary while
+the same infrastructure quietly connects many accounts. AbuseRing watches every
+transaction and looks for the network forming behind them — automatically, with
+no pattern selection.”
 
-Say: “Individual transactions can look ordinary while the same infrastructure
-quietly connects many accounts. AbuseRing looks for the network forming behind
-the transaction.”
+## 0:20–0:35 — Start the stream
 
-## 0:20–0:45 — Plausible events
+Expand **Demo Traffic Generator** (collapsed by default — it is a traffic
+source, not a detection mode), leave **Mixed multi-entity** selected, click
+**START DEMO TRAFFIC**, and collapse the generator again. Say: “A stream of
+transactions is now arriving. Each one is scored by the real frozen Model F-R1
+through the live API.”
 
-Open **Demo Mode** and choose **Mixed multi-entity**. Explain that the replay
-uses ordinary-looking amounts and customers with shared device, address, IP,
-and payment relationships. The exact score and case outcome come from the
-frozen R1 pipeline.
+## 0:35–1:10 — Scores appear
 
-## 0:45–1:20 — Network forms
+Point to the Transaction Stream filling row by row (~0.9 s apart). Early events
+score low — `NORMAL`, then `WATCHING`. Say: “No single order is obviously
+fraudulent. The score reflects what each event is connected to.”
 
-Click **RUN SCENARIO**. Point to the `Event n of 8` progression, score, alert, and cases returned so far
-from the backend. Use a fresh replay ID; prior demo state may remain in the
-process-local case repository. The UI is sending every event through the real `/v1/predict`
-endpoint and waiting for the backend case API; it is not fabricating cases.
+## 1:10–1:30 — The risk signal
 
-## 1:20–1:50 — Case or alert outcome
+When the first `ALERT` row appears, point to the **NETWORK RISK SIGNAL**
+banner: “The calibrated score crossed the 0.50 review threshold. This is a
+review signal for an analyst — not confirmed fraud, and nothing is enforced.”
+Statuses derive directly from backend scores; fallback responses never present
+as alerts.
 
-If the backend returns a case, open **Case Workspace** and select it. Highlight
-severity, risk, alert count, related customers, and **observed exposure**. If no
-qualifying alert/case is returned, stay on the alert/evidence state and say that
-the locked R1 pipeline did not create a case for this replay; do not fabricate
-one.
+## 1:30–2:10 — The case builds itself
 
-Say: “The score is a shadow signal for analyst review. No customer transaction
-is blocked or modified.”
+Point to **Active Investigation** appearing below the feed without any click:
+risk, connected accounts, alerts, shared entities, observed exposure. Say:
+“Related alerts consolidate automatically into one investigation case.” As new
+alerts arrive, watch the numbers and the **Network** graph grow: customers
+(circles) connecting through shared devices, addresses, IPs, and payments
+(diamonds) — supposedly separate customers, one network.
 
-## 1:50–2:20 — Evidence and graph
+## 2:10–2:30 — Evidence and timeline
 
-Show **Observed evidence associated with elevated risk**, then open **Network
-Explorer**. Point out customer/order/entity node types and shared relationship
-edges. Hover/zoom if Graphviz is available; use the relationship table as the
-fallback.
+Read one or two evidence lines under **Observed evidence associated with
+elevated risk** (observed signals, never causal claims). Point to the
+**Timeline**: threshold crossing and case creation, from backend data.
 
-## 2:20–2:40 — Timeline and analyst workflow
+## 2:30–2:50 — Legitimate control
 
-Return to the workspace and show the timeline. Open technical details only if a
-judge asks. Status/note mutations require the configured local admin token.
+Expand the generator, choose **Legitimate high-connectivity**, **START DEMO
+TRAFFIC**, collapse. Scores stay low and no case appears. Say: “Shared
+infrastructure alone is not enough. This is the real frozen model’s answer — we
+never force a result.”
 
-## 2:40–2:55 — Legitimate control
+## 2:50–3:00 — Close
 
-Open Demo Mode, choose **Legitimate high-connectivity**, and run it with a new
-replay ID. Say: “Shared infrastructure alone is not enough. This control is
-reported from the real frozen R1 output; we do not force a negative result.”
-
-## 2:55–3:00 — Close
-
-Open **System Health** briefly and point to R1 checksum verification, 137
-features, Redis health, shadow mode, and enforcement disabled.
-
-Close with: “AbuseRing turns coordinated risk signals into an explainable analyst
-case, while keeping the production decision path safely in shadow mode.”
+Point to the bottom status strip (API / Redis / Model F-R1 indicators, Shadow
+Mode ON, Enforcement OFF). Close with: “AbuseRing turns connected risk signals
+into one explainable analyst case, while the production decision path stays
+safely in shadow mode.”
 
 ## Guardrails
 
-All displayed cases are `DEMO / SYNTHETIC`. They are not live-production
-observation evidence. The seven-day gate remains not started and Canary Stage 1
-remains blocked.
+All displayed data is `DEMO / SYNTHETIC` — not live-production observation
+evidence. The seven-day gate remains not started and Canary Stage 1 remains
+blocked. If the backend returns no case for a run, the UI says so; never
+fabricate a case or an alert.

@@ -14,17 +14,40 @@ timeline, and analyst workflow.”
 
 ```mermaid
 flowchart LR
-    E[Order and payment events] --> F[Strict as-of feature engine\n137 ordered features]
-    F --> R[(Redis streaming state)]
-    F --> M[Model F-R1\nfrozen artifact]
-    M --> C[Isotonic calibration\nthreshold 0.50]
-    C --> A[Shadow alert\nno enforcement]
-    A --> K[Observable-entity\ncase consolidation]
-    K --> X[Evidence + graph + timeline]
-    X --> U[AbuseRing\nCommand Center]
-    M --> L[SHA-256 contract\nreadiness validation]
-    A --> D[Audit JSONL + metrics]
-    S[Shadow safety\nENFORCE_DECISIONS=false] -.-> A
+    T[TRANSACTIONS] --> FE[FEATURE ENGINE<br/>Behavior · Temporal · Graph ·<br/>Customer-relative · Two-hop · Subgraph]
+    FE --> N[137 FEATURES]
+    N --> M[MODEL F-R1<br/>frozen artifact]
+    M --> S[RISK SCORE]
+    S --> A[ALERTS<br/>shadow · no enforcement]
+    A --> RM[RELATIONSHIP MATCHING<br/>shared observable entities]
+    RM --> C[INVESTIGATION CASE]
+    subgraph CASE[" "]
+        direction LR
+        C --> EV[Evidence]
+        C --> NW[Network]
+        C --> TL[Timeline]
+    end
+    EV --> UI[ABUSERING COMMAND CENTER]
+    NW --> UI
+    TL --> UI
+    UI --> IV[INVESTIGATOR]
+    S --> G[SHA-256 contract<br/>readiness gate] -.->|fail closed| FE
+```
+
+## Example relationship diagram
+
+One shared infrastructure node connects supposedly separate customers:
+
+```mermaid
+graph TD
+    CA[Customer A] ---|uses| DX((Device X))
+    DX ---|used by| CB[Customer B]
+    CA ---|from| IZ((IP Z))
+    IZ ---|shared by| CC[Customer C]
+    CB ---|ships to| AQ((Address Q))
+    AQ ---|shared by| CD[Customer D]
+    CC ---|paid with| PP((Payment P))
+    PP ---|used by| CD
 ```
 
 ## Design principles

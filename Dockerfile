@@ -46,7 +46,7 @@ ENV PYTHONPATH="/app/src" \
     PYTHONUNBUFFERED=1 \
     PORT=8000 \
     HOST=0.0.0.0 \
-    WORKERS=4 \
+    WORKERS=1 \
     SHADOW_MODE=true \
     ENFORCE_DECISIONS=false
 
@@ -57,4 +57,6 @@ EXPOSE 8000
 HEALTHCHECK --interval=10s --timeout=3s --start-period=15s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-ENTRYPOINT ["uvicorn", "abuse_ring_detector.api:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
+# WORKERS env (default 1): the investigator case store is process-local, so
+# multi-worker deployments 404 non-deterministically on case reads.
+ENTRYPOINT ["sh", "-c", "uvicorn abuse_ring_detector.api:app --host 0.0.0.0 --port 8000 --workers ${WORKERS:-1}"]

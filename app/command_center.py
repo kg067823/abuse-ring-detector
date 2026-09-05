@@ -1,201 +1,305 @@
-"""AbuseRing Command Center — API-backed investigator console.
+"""AbuseRing Live Monitor — monitoring console, not a scenario selector.
+
+Real-time-feel transaction stream: events are scored one at a time by the real
+frozen Model F-R1 via /v1/predict; alerts and the investigation case update
+automatically as the stream flows. Demo scenarios are only a traffic generator
+(hidden in a collapsed expander), never detection modes.
 
 Run with: streamlit run app/command_center.py
 """
 from __future__ import annotations
 
-import json
-import os
-import re
 import sys
+import time
 from pathlib import Path
 
 import streamlit as st
 
 APP = Path(__file__).resolve().parent
-ROOT = APP.parent
 if str(APP) not in sys.path:
     sys.path.insert(0, str(APP))
 from api_client import ApiError, CommandCenterClient
-from command_center_helpers import aggregate_cases, filter_items, graph_counts, timeline_sorted
-from demo_scenarios import SCENARIOS, scenario_payloads
+from demo_scenarios import scenario_payloads
+from monitor import (
+    REVIEW_THRESHOLD,
+    SCENARIOS,
+    graph_dot,
+    mask_customer,
+    masked_orders_for_run,
+    pick_active_case,
+    risk_status,
+    row_from_event,
+    shared_entity_count,
+    status_color,
+    timeline_view,
+)
 
-st.set_page_config(page_title="AbuseRing Command Center", page_icon="◈", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="AbuseRing Live Monitor", page_icon="◈", layout="wide")
 st.markdown("""
 <style>
-:root { --ink:#e8edf2; --muted:#91a0af; --panel:#151d27; --panel2:#1b2633; --line:#2b3948; --cyan:#4fd1c5; --red:#f87171; --amber:#fbbf24; --green:#34d399; }
-.stApp { background: #0c1219; color: var(--ink); }
-.block-container { max-width: 1480px; padding: 2rem 3rem 4rem; }
-.hero { background: linear-gradient(135deg,#172431,#101820); border:1px solid #304050; border-radius:18px; padding:28px 32px; margin-bottom:22px; }
-.eyebrow { color:var(--cyan); font-size:11px; font-weight:800; letter-spacing:.16em; text-transform:uppercase; }
-.hero h1 { color:#f7fafc; letter-spacing:-.045em; margin:.3rem 0 .45rem; font-size:2.5rem; }
-.hero p,.muted { color:var(--muted); }
-.panel { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:18px; }
-.badge { border-radius:999px; padding:3px 9px; font-size:11px; font-weight:700; }
-.demo { color:#07141b; background:var(--cyan); border-radius:999px; padding:5px 10px; font-size:11px; font-weight:800; }
-[data-testid="stMetricValue"] { color:#f7fafc; }
+:root { --ink:#e8edf2; --muted:#93a3b3; --panel:#141d27; --line:#2b3948; --cyan:#4fd1c5; --red:#f87171; --amber:#fbbf24; --green:#34d399; }
+.stApp { background:#0c1219; color:var(--ink); }
+.block-container { max-width:1240px; padding:1.2rem 2.2rem 2rem; }
+h1, h2, h3 { letter-spacing:-.02em; }
+.badge { border-radius:999px; padding:3px 11px; font-size:11.5px; font-weight:700; margin-right:6px; }
+.badge.demo  { color:#07141b; background:var(--cyan); }
+.badge.shadow{ color:#fbbf24; background:#fbbf241a; }
+.badge.off   { color:#f87171; background:#f871711a; }
+.streamdot { font-size:13px; font-weight:700; }
+.alertbanner { background:linear-gradient(90deg,#3b1216,#221014); border:1px solid var(--red); border-radius:10px; padding:10px 18px; margin:8px 0; }
+.alertbanner .t { color:var(--red); font-weight:800; font-size:15px; letter-spacing:.05em; }
+.alertbanner .s { color:#f3c1c1; font-size:13px; margin-top:2px; }
+.legend-dot { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:5px; }
+[data-testid="stMetricValue"] { color:#f7fafc; font-size:1.5rem; }
+[data-testid="stMetricLabel"] { color:var(--muted); font-size:.82rem; }
+[data-testid="stExpander"] { border:1px solid var(--line); border-radius:10px; }
+.stButton > button { border-radius:9px; font-weight:700; }
+/* Hide Streamlit chrome: hamburger menu, Deploy button, "made with Streamlit", running-man */
+#MainMenu, header[data-testid="stHeader"] button[kind="header"], footer, [data-testid="stStatusWidget"],
+header[data-testid="stHeader"] [data-testid="stLogo"], header[data-testid="stHeader"] a[title*="streamlit" i],
+header[data-testid="stHeader"] div[data-testid="stDecoration"] { visibility:visible; opacity:0; height:0; pointer-events:none; }
+header[data-testid="stHeader"] { background:transparent; }
+/* Brand mark in header */
+.brandmark { display:inline-grid; place-items:center; width:44px; height:44px; border-radius:12px;
+  background:radial-gradient(circle at 32% 28%, #1d3a44, #0e1b24 70%); border:1px solid #2b4a56; margin-right:14px; }
+.brandmark .ring { width:22px; height:22px; border:3px solid var(--cyan); border-radius:50%;
+  box-shadow:0 0 0 3px #4fd1c526, inset 0 0 0 1px #4fd1c55c; }
+.brandmark .node { position:absolute; }
+footer { visibility:hidden; }
+h3 { margin-top:.6rem; margin-bottom:.35rem; }
 </style>
 """, unsafe_allow_html=True)
 
 client = CommandCenterClient()
 
-
-def money(value: float) -> str:
-    return f"₹{value:,.0f}"
-
-
-def badge(value: str) -> str:
-    colors = {"CRITICAL": "#f87171", "HIGH": "#fb923c", "MEDIUM": "#fbbf24", "LOW": "#34d399", "NEW": "#4fd1c5", "IN_REVIEW": "#60a5fa", "ESCALATED": "#f87171"}
-    color = colors.get(value, "#91a0af")
-    return f'<span class="badge" style="background:{color}22;color:{color}">{value.replace("_", " ")}</span>'
+TICK_PAUSE = 0.9          # seconds between demo events (0.7–1.5s per spec)
+MAX_FEED_ROWS = 9         # compact feed for recording
 
 
-def fetch(path: str, fallback):
+def money(v: float) -> str:
+    return f"₹{v:,.0f}"
+
+
+# ------------------------------------------------------------------ header
+st.markdown('<div style="display:flex;align-items:baseline;gap:16px;flex-wrap:wrap">'
+            '<h1 style="margin:0;font-size:1.9rem">AbuseRing</h1>'
+            '<span style="color:#93a3b3;font-size:1.02rem">Fraud systems inspect transactions. '
+            '<b style="color:#e8edf2">AbuseRing investigates networks.</b></span>'
+            '<span style="margin-left:auto">'
+            '<span class="badge demo">DEMO / SYNTHETIC</span>'
+            '<span class="badge shadow">SHADOW MODE</span>'
+            '<span class="badge off">ENFORCEMENT OFF</span>'
+            '</span></div>', unsafe_allow_html=True)
+st.caption("AbuseRing watches every transaction automatically — no pattern selection, no manual triage. "
+           "Risk below 0.30 is Normal, 0.30–0.50 is Watching, and a score at or above the 0.50 review threshold raises a network risk signal.")
+
+running = st.session_state.get("running", False)
+st.markdown(f'<div class="streamdot" style="color:{"#34d399" if running else "#93a3b3"}">'
+            f'{"● DEMO STREAM RUNNING" if running else "○ STREAM IDLE"}</div>', unsafe_allow_html=True)
+
+# ------------------------------------------------- demo traffic generator
+with st.expander("Demo Traffic Generator (synthetic replay — not a detection mode)", expanded=running):
+    gc1, gc2, gc3, gc4 = st.columns([2, 1, 1, 1])
+    with gc1:
+        scenario = st.selectbox("Traffic scenario", SCENARIOS, index=0,
+                                disabled=running, label_visibility="collapsed")
+    with gc2:
+        start_clicked = st.button("▶ START DEMO TRAFFIC", type="primary", disabled=running, use_container_width=True)
+    with gc3:
+        stop_clicked = st.button("■ STOP", disabled=not running, use_container_width=True)
+    with gc4:
+        reset_clicked = st.button("⟲ RESET", use_container_width=True)
+
+    st.caption("Generates synthetic transactions through the real /v1/predict pipeline. "
+               "Detection is fully automatic — the scenario only decides what traffic looks like.")
+
+if stop_clicked:
+    st.session_state["running"] = False
+    st.rerun()
+
+if reset_clicked:
+    st.session_state.clear()
+    st.session_state["run_n"] = 0
+    st.rerun()
+
+if start_clicked:
+    st.session_state["running"] = True
+    st.session_state["pending"] = scenario_payloads(scenario, f"run{st.session_state.get('run_n', 0) + 1}")
+    st.session_state["run_orders"] = {p["order_id"] for p in st.session_state["pending"]}
+    st.session_state["previous"] = []
+    st.session_state["masked_orders"] = set()
+    st.rerun()
+
+# ------------------------------------------------------ tick: one event per rerun
+if st.session_state.get("running") and st.session_state.get("pending"):
+    payload = st.session_state["pending"].pop(0)
+    index = st.session_state.get("sent", 0) + 1
     try:
-        return getattr(client, path)()
+        response = client.predict(payload)
     except ApiError as exc:
-        st.error(str(exc))
-        return fallback
-
-
-st.sidebar.markdown("## ◈ AbuseRing")
-st.sidebar.caption("Command Center · investigator console")
-page = st.sidebar.radio("Navigate", ["Overview", "Alert Queue", "Investigation Cases", "Case Workspace", "Network Explorer", "System Health", "Demo Mode"])
-st.sidebar.markdown('<span class="demo">DEMO DATA / SYNTHETIC</span>', unsafe_allow_html=True)
-st.sidebar.caption("R1 shadow mode · no customer enforcement")
-
-if page == "System Health":
-    st.markdown('<div class="hero"><div class="eyebrow">Operations / model integrity</div><h1>System Health</h1><p>Runtime signals for the frozen Model F-R1 shadow service.</p></div>', unsafe_allow_html=True)
-    try:
-        health, ready, live, metrics = client.health(), client.readiness(), client.liveness(), client.metrics()
-        cols = st.columns(4)
-        cols[0].metric("API", health.get("status", "unknown").upper())
-        cols[1].metric("Readiness", ready.get("status", "unknown").upper())
-        cols[2].metric("Features", ready.get("feature_count", "—"))
-        cols[3].metric("Threshold", ready.get("threshold", "—"))
-        st.success("SHADOW MODE · NO CUSTOMER ENFORCEMENT")
-        st.json({"health": health, "readiness": ready, "liveness": live})
-        with st.expander("Prometheus metrics"):
-            st.code(metrics if isinstance(metrics, str) else json.dumps(metrics, indent=2))
-    except ApiError as exc:
-        st.error(str(exc)); st.button("Retry")
-    st.stop()
-
-if page == "Demo Mode":
-    st.markdown('<div class="hero"><div class="eyebrow">Demo / synthetic replay</div><h1>Build the network</h1><p>Individually plausible events become an observable investigation case through the real R1 API.</p></div>', unsafe_allow_html=True)
-    st.warning("DEMO / SYNTHETIC DATA — these records are not live production evidence.")
-    scenario = st.selectbox("Scenario", SCENARIOS, index=2)
-    run_id = st.text_input("Replay ID", "demo-001", help="Use a new ID for a fresh replay; repeated IDs exercise backend idempotency.")
-    if st.button("RUN SCENARIO", type="primary"):
-        progress = st.empty(); results = []
-        try:
-            for index, payload in enumerate(scenario_payloads(scenario, run_id), start=1):
-                response = client.predict(payload)
-                cases_now = client.cases().get("items", [])
-                results.append(response)
-                state = "Risk emerging" if response.get("alert") else "Observed signal"
-                progress.info(f"Event {index} of 8 · {state} · score {response.get('calibrated_score', 0):.3f} · {len(cases_now)} case(s)")
-            final_cases = client.cases().get("items", [])
-            st.success(f"Replay complete · {sum(bool(row.get('alert')) for row in results)} alert(s) · {len(final_cases)} case(s) returned")
-            st.json({"label": "DEMO / SYNTHETIC", "scenario": scenario, "progression": [{"event": i + 1, "score": row.get("calibrated_score"), "alert": row.get("alert"), "fallback": row.get("fallback_applied")} for i, row in enumerate(results)]})
-            if final_cases:
-                st.session_state["selected_case"] = final_cases[0].get("case_id")
-                st.info("Case created. Open Case Workspace to inspect evidence, graph, and timeline.")
-            elif scenario == "Legitimate high-connectivity":
-                st.info("Control result: shared infrastructure alone is not enough. No case was returned by the backend.")
-        except ApiError as exc:
-            st.error(f"Scenario stopped safely: {exc}")
-    st.caption("The runner uses /v1/predict only; no model or case object is fabricated in the UI.")
-    st.stop()
-
-try:
-    cases_payload = client.cases()
-    alerts_payload = client.alerts()
-    cases = cases_payload.get("items", [])
-    alerts = alerts_payload.get("items", [])
-except ApiError as exc:
-    st.markdown('<div class="hero"><div class="eyebrow">Connection required</div><h1>Command Center unavailable</h1><p>Start the API and Redis stack, then retry.</p></div>', unsafe_allow_html=True)
-    st.error(str(exc)); st.code("ADMIN_KILL_SWITCH_TOKEN=demo-secret docker compose up --build", language="bash"); st.stop()
-
-summary = aggregate_cases(cases)
-
-if page == "Overview":
-    st.markdown('<div class="hero"><div class="eyebrow">Coordinated abuse intelligence</div><h1>Detect the network, not just the account.</h1><p>Turn shadow alerts into explainable investigation cases while the frozen R1 model remains non-enforcing.</p></div>', unsafe_allow_html=True)
-    st.markdown('<span class="demo">DEMO DATA / SYNTHETIC</span> &nbsp; <span class="muted">Model F-R1 · isotonic calibration · threshold 0.50</span>', unsafe_allow_html=True)
-    cols = st.columns(5)
-    cols[0].metric("Open cases", summary["open"])
-    cols[1].metric("Critical", summary["critical"])
-    cols[2].metric("High-risk alerts", len(alerts))
-    cols[3].metric("Estimated exposure", money(summary["exposure"]))
-    cols[4].metric("Average case risk", f'{summary["avg_risk"]:.2f}')
-    left, right = st.columns(2)
-    with left:
-        st.markdown("### Cases by severity")
-        st.bar_chart(summary["by_severity"])
-    with right:
-        st.markdown("### Cases by status")
-        st.bar_chart(summary["by_status"])
-    st.markdown("### What is active now")
-    st.dataframe(cases[:10], use_container_width=True, hide_index=True)
-
-elif page == "Alert Queue":
-    st.markdown('<div class="hero"><div class="eyebrow">Triage / alert queue</div><h1>High-risk signals</h1><p>Every row is a shadow alert from the R1 backend. Select a case to investigate; no customer action is taken.</p></div>', unsafe_allow_html=True)
-    c1, c2, c3 = st.columns([2,1,1])
-    query = c1.text_input("Search masked ID or evidence")
-    severity = c2.selectbox("Severity", ["ALL", "CRITICAL", "HIGH", "MEDIUM", "LOW"])
-    min_risk = c3.slider("Minimum risk", 0.0, 1.0, 0.5, 0.01)
-    filtered = filter_items(alerts, query, severity, "ALL")
-    filtered = [row for row in filtered if row.get("risk_score", 0) >= min_risk]
-    st.caption(f"{len(filtered)} alerts · DEMO / SYNTHETIC")
-    for alert in filtered:
-        with st.container(border=True):
-            cols = st.columns([1,1,1,2,1])
-            cols[0].markdown(badge("HIGH" if alert.get("risk_score",0) < .9 else "CRITICAL"), unsafe_allow_html=True)
-            cols[1].metric("Risk", f'{alert.get("risk_score",0):.3f}')
-            cols[2].caption("Masked order"); cols[2].write(alert.get("order_id", "—"))
-            cols[3].write(alert.get("evidence", [{}])[0].get("description", "Observed evidence associated with elevated risk.") if alert.get("evidence") else "Observed evidence associated with elevated risk.")
-            cols[4].caption(alert.get("created_at", "—"))
-
-elif page == "Investigation Cases":
-    st.markdown('<div class="hero"><div class="eyebrow">Investigation queue</div><h1>Cases</h1><p>Deterministic cases consolidated from observable graph relationships.</p></div>', unsafe_allow_html=True)
-    c1,c2,c3 = st.columns([1,1,2]); status_filter=c1.selectbox("Status", ["ALL","NEW","IN_REVIEW","ESCALATED","CONFIRMED_ABUSE","LEGITIMATE","CLOSED"]); severity_filter=c2.selectbox("Severity", ["ALL","MEDIUM","HIGH","CRITICAL"]); search=c3.text_input("Search cases")
-    rows=filter_items(cases, search, severity_filter, status_filter)
-    for case in rows:
-        with st.container(border=True):
-            cols=st.columns([1.2,1,1,1,1,2]); cols[0].markdown(badge(case.get("severity","—")), unsafe_allow_html=True); cols[1].markdown(badge(case.get("status","—")), unsafe_allow_html=True); cols[2].metric("Risk",f'{case.get("risk_score",0):.3f}'); cols[3].metric("Alerts",case.get("alert_count",0)); cols[4].metric("Exposure",money(case.get("estimated_exposure",0))); cols[5].write(case.get("case_id","—"))
-
-elif page in {"Case Workspace", "Network Explorer"}:
-    st.markdown('<div class="hero"><div class="eyebrow">Investigator workspace</div><h1>Understand the ring.</h1><p>Observed evidence associated with elevated risk — never causal attribution.</p></div>', unsafe_allow_html=True)
-    if not cases: st.info("No cases found. Run the deterministic demo replay to create cases."); st.stop()
-    case_ids = [case.get("case_id") for case in cases]
-    default_index = case_ids.index(st.session_state.get("selected_case")) if st.session_state.get("selected_case") in case_ids else 0
-    selected = st.selectbox("Case", case_ids, index=default_index)
-    try:
-        case = client.case(selected); evidence = client.evidence(selected); timeline = client.timeline(selected); graph = client.graph(selected)
-    except ApiError as exc: st.error(str(exc)); st.stop()
-    top=st.columns(5); top[0].markdown(badge(case.get("severity","—")),unsafe_allow_html=True); top[1].markdown(badge(case.get("status","—")),unsafe_allow_html=True); top[2].metric("Risk",f'{case.get("risk_score",0):.3f}'); top[3].metric("Exposure",money(case.get("estimated_exposure",0))); top[4].caption("Model"); top[4].write(case.get("model_version","model_f_r1"))
-    st.info("Observed evidence associated with elevated risk. These signals are not causal proof.")
-    if page == "Network Explorer":
-        st.subheader("Network explorer"); st.caption(f'{graph_counts(graph)["nodes"]} nodes · {graph_counts(graph)["edges"]} edges')
-        legend = {"customer": "● Customer", "order": "■ Order", "device_id": "◆ Device", "address_id": "◆ Address", "ip_id": "◆ IP", "payment_id": "◆ Payment"}
-        st.caption(" · ".join(legend.values()))
-        dot = "graph {\nnode [fontname=Helvetica, style=filled, color=\"#4fd1c5\"];\n" + "\n".join(f'"{node["id"]}" [label="{legend.get(node.get("type"), node.get("type"))}\\n{node["id"][-8:]}"];' for node in graph.get("nodes", [])) + "\n" + "\n".join(f'"{edge["source"]}" -- "{edge["target"]}" [label="{edge["relationship"]}"];' for edge in graph.get("edges", [])) + "\n}"
-        try:
-            st.graphviz_chart(dot, use_container_width=True)
-        except Exception:
-            st.warning("Graph rendering is unavailable; showing the relationship table instead.")
-        st.dataframe(graph.get("nodes", []), use_container_width=True, hide_index=True)
+        st.session_state["running"] = False
+        st.error(f"Stream stopped safely: {exc}")
     else:
-        left,right=st.columns([1.2,1])
-        with left:
-            st.subheader("Why this case was surfaced")
-            for item in evidence.get("items", []):
-                with st.container(border=True): st.markdown(f"**{item.get('description','Observed signal')}**"); st.caption(f"Value: {item.get('value','—')} · Window: {item.get('window','—')} · Provenance: {item.get('provenance','observed_signal')}")
-            st.subheader("Timeline")
-            for event in timeline_sorted(timeline.get("items", [])): st.write(f'**{event.get("timestamp","—")}** · {event.get("description","—")}')
-        with right:
-            st.subheader("Network context"); st.metric("Nodes",graph_counts(graph)["nodes"]); st.metric("Edges",graph_counts(graph)["edges"]); st.dataframe(graph.get("edges", []), use_container_width=True, hide_index=True)
-            st.subheader("Analyst action")
-            st.caption("Mutations require ABUSERING_ADMIN_TOKEN; no customer enforcement is enabled.")
-            st.write("Status mutation is available through the authenticated backend API.")
-            with st.expander("Technical details"): st.json(case.get("history", []))
+        st.session_state["previous"].append(payload)
+        st.session_state.setdefault("events", []).append(
+            row_from_event(index, payload, response, st.session_state["previous"][:-1])
+        )
+        st.session_state["sent"] = index
+        # Refresh the raw→masked order mapping from live alerts after each event.
+        try:
+            st.session_state["masked_orders"] = masked_orders_for_run(
+                client.alerts().get("items", []), st.session_state.get("run_orders", set())
+            )
+        except ApiError:
+            pass
+        if not st.session_state["pending"]:
+            st.session_state["running"] = False
+            st.session_state["stream_done"] = True
+    time.sleep(TICK_PAUSE)
+    st.rerun()
+
+# ------------------------------------------------------ transaction stream
+st.markdown("### Transaction Stream")
+events = st.session_state.get("events", [])
+
+if not events:
+    st.info("Waiting for transactions… start the demo traffic generator to feed the live pipeline.")
+else:
+    # Alert banner before the first alert row.
+    shown_banner = st.session_state.get("banner_shown", False)
+    header = ("Time | Customer | Amount | Risk | Status | Observation")
+    feed_html = ['<div style="font-size:12px;color:#93a3b3;letter-spacing:.06em;'
+                 'display:grid;grid-template-columns:90px 130px 90px 70px 110px 1fr;gap:0 12px;'
+                 'padding:4px 14px;">' +
+                 "".join(f"<span>{h}</span>" for h in header.split(" | ")) + "</div>"]
+    for row in events[-MAX_FEED_ROWS:]:
+        color = status_color(row["status"])
+        weight = "800" if row["status"] == "ALERT" else "600"
+        bg = "#2a1518" if row["status"] == "ALERT" else ("#241f10" if row["status"] == "WATCHING" else "var(--panel)")
+        feed_html.append(
+            f'<div style="display:grid;grid-template-columns:90px 130px 90px 70px 110px 1fr;gap:0 12px;'
+            f'align-items:center;background:{bg};border:1px solid {"#f8717155" if row["status"] == "ALERT" else "var(--line)"};'
+            f'border-radius:9px;padding:7px 14px;margin-bottom:5px;font-size:14.5px;">'
+            f'<span style="color:#93a3b3">{row["time"]}</span>'
+            f'<span>{row["customer"]}</span>'
+            f'<span>{money(row["amount"])}</span>'
+            f'<span style="font-weight:800;color:{color}">{row["risk"]:.2f}</span>'
+            f'<span style="font-weight:{weight};color:{color}">{row["status"]}</span>'
+            f'<span style="color:#93a3b3;font-size:13px">{row["observation"]}</span>'
+            f'</div>'
+        )
+    st.markdown("".join(feed_html), unsafe_allow_html=True)
+    if len(events) > MAX_FEED_ROWS:
+        st.caption(f"Showing latest {MAX_FEED_ROWS} of {len(events)} scored events.")
+
+    first_alert = next((r for r in events if r["status"] == "ALERT"), None)
+    if first_alert and not shown_banner:
+        st.session_state["banner_shown"] = True
+    if first_alert:
+        st.markdown(
+            f'<div class="alertbanner"><div class="t">⚠ NETWORK RISK SIGNAL</div>'
+            f'<div class="s">Risk score {first_alert["risk"]:.2f} reached the review threshold {REVIEW_THRESHOLD:.2f}. '
+            f'Review signal generated — not confirmed fraud. Shadow mode: no customer action.</div></div>',
+            unsafe_allow_html=True,
+        )
+
+# ------------------------------------------------------ active investigation
+st.markdown("### Active Investigation")
+
+active_case = None
+case_bundle = None
+try:
+    cases = client.cases().get("items", [])
+    active_case = pick_active_case(cases, st.session_state.get("masked_orders", set()) or st.session_state.get("run_orders", set()))
+    if active_case:
+        case_id = active_case["case_id"]
+        case_bundle = {
+            "case": client.case(case_id),
+            "graph": client.graph(case_id),
+            "timeline": client.timeline(case_id),
+            "evidence": client.evidence(case_id),
+        }
+except ApiError as exc:
+    st.error(f"Backend unavailable: {exc}")
+
+if not case_bundle:
+    if st.session_state.get("stream_done"):
+        st.info("Stream complete. The frozen R1 pipeline returned no qualifying case for this traffic — reported as returned.")
+    else:
+        st.caption("No active investigation case yet.")
+else:
+    case = case_bundle["case"]
+    graph = case_bundle["graph"]
+    cols = st.columns(5)
+    cols[0].metric("Risk Score", f'{case.get("risk_score", 0):.2f}')
+    cols[1].metric("Connected Accounts", len(case.get("related_customers", []) or []))
+    cols[2].metric("Alerts", case.get("alert_count", 0))
+    cols[3].metric("Shared Entities", shared_entity_count(graph))
+    cols[4].metric("Observed Exposure", money(case.get("estimated_exposure", 0)))
+
+    st.markdown("**Observed evidence associated with elevated risk**")
+    seen, shown = set(), 0
+    for item in case_bundle["evidence"].get("items", []):
+        desc = item.get("description", "")
+        if desc in seen or shown >= 5:
+            continue
+        seen.add(desc)
+        shown += 1
+        st.markdown(f'- {desc} `({item.get("value", "")})`')
+
+    with st.expander("Technical details"):
+        st.json({"case_id": case.get("case_id"), "status": case.get("status"),
+                 "evidence_count": len(case_bundle["evidence"].get("items", [])),
+                 "history": case.get("history", [])[-6:]})
+
+    # ------------------------------------------------------ network graph
+    st.markdown("### Network")
+    gl, gr = st.columns([0.62, 0.38])
+    with gl:
+        try:
+            st.graphviz_chart(graph_dot(graph), use_container_width=True)
+        except Exception as exc:
+            st.warning(f"Graph rendering unavailable ({exc}).")
+    with gr:
+        st.caption("● Customer &nbsp;·&nbsp; ◆ Shared device / address / IP / payment")
+        st.caption("Supposedly separate customers, one network. Orders hidden for clarity; full relationship data is in the backend.")
+
+    # ------------------------------------------------------ timeline
+    st.markdown("### Timeline")
+    for row in timeline_view(case_bundle["timeline"].get("items", [])):
+        st.markdown(f'`{row["time"]}`  {row["event"]}')
+
+# ------------------------------------------------------ compact alerts panel
+try:
+    alerts = client.alerts().get("items", [])[:5]
+except ApiError:
+    alerts = []
+if alerts:
+    with st.expander(f"Active Alerts ({len(alerts)} shown)"):
+        for alert in alerts:
+            risk = float(alert.get("risk_score", 0) or 0)
+            color = status_color(risk_status(risk))
+            ts = str(alert.get("created_at", ""))[11:19]
+            st.markdown(f'`{ts}`  {mask_customer(str(alert.get("customer_id", "")))} '
+                        f'<span style="color:{color};font-weight:800">{risk:.2f}</span> '
+                        f'<span style="color:#93a3b3">{str(alert.get("order_id", ""))[-6:]}</span>', unsafe_allow_html=True)
+
+# ------------------------------------------------------ system status
+st.divider()
+cols = st.columns([1, 2])
+with cols[0]:
+    st.caption("Shadow Mode: **ON** · Enforcement: **OFF** · Threshold 0.50 locked · Model F-R1")
+with cols[1]:
+    try:
+        ready = client.readiness()
+        dots = "".join(
+            f'<span class="legend-dot" style="background:{"#34d399" if ok else "#f87171"}"></span>{label} &nbsp; '
+            for label, ok in (
+                ("API", ready.get("status") == "ready"),
+                ("Redis", bool(ready.get("state_backend_healthy"))),
+                ("Model F-R1", bool(ready.get("model_loaded"))),
+            )
+        )
+        st.markdown(dots, unsafe_allow_html=True)
+    except ApiError:
+        st.markdown('<span class="legend-dot" style="background:#f87171"></span>API offline', unsafe_allow_html=True)

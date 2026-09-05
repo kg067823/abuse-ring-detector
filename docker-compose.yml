@@ -11,7 +11,7 @@ services:
     environment:
       - HOST=0.0.0.0
       - PORT=8000
-      - WORKERS=4
+      - WORKERS=1
       - REDIS_URL=redis://redis:6379/0
       - MODEL_PATH=/app/artifacts/model_f_r1_bundle.pkl
       - MODEL_MANIFEST_PATH=/app/model_f_r1_manifest.json
